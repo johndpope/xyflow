@@ -173,10 +173,18 @@ class NodeDefinition {
 
   /// Create from ComfyUI object_info API response.
   factory NodeDefinition.fromApi(String name, Map<String, dynamic> data) {
-    final inputData = data['input'] as Map<String, dynamic>? ?? {};
-    final requiredInputs = inputData['required'] as Map<String, dynamic>? ?? {};
-    final optionalInputs = inputData['optional'] as Map<String, dynamic>? ?? {};
-    final hiddenInputs = inputData['hidden'] as Map<String, dynamic>? ?? {};
+    // Safely cast nested maps - API may return _Map<dynamic, dynamic>
+    Map<String, dynamic> _safeCastMap(dynamic value) {
+      if (value == null) return {};
+      if (value is Map<String, dynamic>) return value;
+      if (value is Map) return value.cast<String, dynamic>();
+      return {};
+    }
+
+    final inputData = _safeCastMap(data['input']);
+    final requiredInputs = _safeCastMap(inputData['required']);
+    final optionalInputs = _safeCastMap(inputData['optional']);
+    final hiddenInputs = _safeCastMap(inputData['hidden']);
 
     final outputNames = (data['output'] as List?)?.cast<String>() ?? [];
     final outputIsList = (data['output_is_list'] as List?)?.cast<bool>() ?? [];

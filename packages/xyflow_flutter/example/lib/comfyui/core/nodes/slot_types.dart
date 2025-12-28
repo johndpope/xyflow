@@ -186,7 +186,12 @@ class SlotDefinition {
       // Type with config: ["INT", {min: 0, max: 100, ...}]
       if (first is String) {
         final type = SlotType.fromTypeName(first);
-        final config = typeData.length > 1 ? typeData[1] as Map<String, dynamic>? : null;
+        // Cast safely - API may return _Map<dynamic, dynamic>
+        Map<String, dynamic>? config;
+        if (typeData.length > 1 && typeData[1] is Map) {
+          final rawConfig = typeData[1] as Map;
+          config = rawConfig.cast<String, dynamic>();
+        }
 
         return SlotDefinition(
           name: name,
