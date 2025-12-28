@@ -183,6 +183,11 @@ class GraphNotifier extends StateNotifier<GraphState> {
   void newGraph(NodeRegistry? registry) {
     state = GraphState(graph: ComfyGraph(registry: registry));
   }
+
+  /// Replace the entire graph (used by undo/redo).
+  void replaceGraph(ComfyGraph newGraph) {
+    state = state.copyWith(graph: newGraph, isDirty: true);
+  }
 }
 
 /// Provider for the node registry.

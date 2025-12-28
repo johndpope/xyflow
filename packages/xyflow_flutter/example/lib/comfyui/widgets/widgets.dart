@@ -3,5 +3,6 @@ library;
 
 export 'comfy_node_widget.dart';
 export 'comfy_edge_widget.dart';
+export 'comfy_reroute_widget.dart';
 export 'node_search_panel.dart';
 export 'properties_panel.dart';
