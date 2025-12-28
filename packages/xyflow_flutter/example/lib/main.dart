@@ -6,6 +6,7 @@ import 'examples/edge_types.dart';
 import 'examples/story_flow.dart';
 import 'examples/node_connector.dart';
 import 'examples/advanced_features.dart';
+import 'comfyui/comfy_flow_example.dart';
 
 void main() {
   runApp(const MyApp());
@@ -110,6 +111,16 @@ class ExampleSelector extends StatelessWidget {
             onTap: () => Navigator.push(
               context,
               MaterialPageRoute(builder: (_) => const AdvancedFeaturesExample()),
+            ),
+          ),
+          _ExampleCard(
+            title: 'ComfyUI Flow',
+            description: 'ComfyUI-style node graph with typed slots and custom widgets.',
+            icon: Icons.memory,
+            color: Colors.deepOrange,
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const ComfyFlowExample()),
             ),
           ),
         ],
