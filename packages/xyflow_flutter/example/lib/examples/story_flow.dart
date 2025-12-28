@@ -349,6 +349,15 @@ class _StoryFlowExampleState extends State<StoryFlowExample>
     _showCanvasContextMenu(details.globalPosition, flowPos);
   }
 
+  /// Focuses the viewport on a specific node with animation
+  void _focusOnNode(String nodeId) {
+    final node = _nodes.firstWhere((n) => n.id == nodeId, orElse: () => _nodes.first);
+    // Center on the node position (add offset for node size)
+    final centerX = node.position.x + 100; // Approximate half-width
+    final centerY = node.position.y + 60;  // Approximate half-height
+    _controller?.setCenter(centerX, centerY, zoom: 1.0, duration: const Duration(milliseconds: 500));
+  }
+
   /// Starts the route visualization animation
   void _startPlayback() {
     if (_isPlaying) {
@@ -385,10 +394,17 @@ class _StoryFlowExampleState extends State<StoryFlowExample>
       }
     });
 
+    final firstItem = _executionPath[0];
     setState(() {
-      _activeNodeId = _executionPath[0].startsWith('e-') ? null : _executionPath[0];
-      _activeEdgeId = _executionPath[0].startsWith('e-') ? _executionPath[0] : null;
+      _activeNodeId = firstItem.startsWith('e-') ? null : firstItem;
+      _activeEdgeId = firstItem.startsWith('e-') ? firstItem : null;
     });
+
+    // Focus on first node
+    if (!firstItem.startsWith('e-')) {
+      _focusOnNode(firstItem);
+    }
+
     _playController!.forward();
   }
 
@@ -409,6 +425,8 @@ class _StoryFlowExampleState extends State<StoryFlowExample>
       } else {
         _activeNodeId = currentItem;
         _activeEdgeId = null;
+        // Focus on the active node
+        _focusOnNode(currentItem);
       }
     });
 
@@ -755,6 +773,19 @@ class _StoryFlowExampleState extends State<StoryFlowExample>
         targetPosition: Position.left,
       ),
 
+      // Video node - tap to import video
+      Node<StoryNodeData>(
+        id: 'video1',
+        type: 'video',
+        position: XYPosition(x: 480, y: 380),
+        data: StoryNodeData(
+          title: 'Intro Video',
+          nodeType: StoryNodeType.video,
+        ),
+        sourcePosition: Position.right,
+        targetPosition: Position.left,
+      ),
+
       // Convergence point
       Node<StoryNodeData>(
         id: 'branch2',
@@ -980,6 +1011,7 @@ class _StoryFlowExampleState extends State<StoryFlowExample>
             ),
             minZoom: 0.2,
             maxZoom: 2.0,
+            panOnDrag: false, // Disable single-finger canvas pan so nodes can be dragged
             panOnScroll: true,  // Two-finger scroll = pan (use pinch or Ctrl+scroll to zoom)
             zoomOnScroll: false, // Disable scroll zoom, use pinch instead
             children: [
@@ -1477,11 +1509,22 @@ class _VideoNodeState extends State<_VideoNode> {
   void _initializeVideo() {
     final data = widget.props.data;
 
-    if (data.videoUrl != null && data.videoUrl!.startsWith('http')) {
-      _controller = VideoPlayerController.networkUrl(Uri.parse(data.videoUrl!))
-        ..initialize().then((_) {
-          if (mounted) setState(() {});
-        });
+    if (data.videoUrl != null) {
+      // Handle both http URLs and blob URLs
+      final url = data.videoUrl!;
+      if (url.startsWith('http') || url.startsWith('blob:')) {
+        _controller =
+            VideoPlayerController.networkUrl(Uri.parse(url))
+              ..initialize().then((_) {
+                if (mounted) {
+                  // Enable looping
+                  _controller!.setLooping(true);
+                  setState(() {});
+                }
+              }).catchError((e) {
+                debugPrint('Error initializing video: $e');
+              });
+      }
     } else if (data.videoBytes != null && !kIsWeb) {
       // For non-web platforms with file bytes, we'd need to write to temp file
       // This is a simplified version - in production you'd handle this properly
@@ -1535,12 +1578,39 @@ class _VideoNodeState extends State<_VideoNode> {
     }
   }
 
+  void _handleFileDropWithUrl(String blobUrl, String name) {
+    // Check if it's a video file
+    final lowerName = name.toLowerCase();
+    if (lowerName.endsWith('.mp4') ||
+        lowerName.endsWith('.mov') ||
+        lowerName.endsWith('.webm') ||
+        lowerName.endsWith('.avi')) {
+      widget.onVideoSelected?.call(null, blobUrl);
+    }
+  }
+
+  void _handleTap() {
+    // If video is loaded, toggle play/pause
+    if (_controller != null && _controller!.value.isInitialized) {
+      setState(() {
+        if (_controller!.value.isPlaying) {
+          _controller!.pause();
+        } else {
+          _controller!.play();
+        }
+      });
+    } else {
+      // No video loaded, open file picker
+      _pickVideo();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final nodeWidget = GestureDetector(
       onDoubleTap: widget.onDoubleTap,
       onSecondaryTapDown: (details) => widget.onSecondaryTap?.call(details.globalPosition),
-      onTap: _pickVideo,
+      onTap: _handleTap,
       child: MouseRegion(
         onEnter: (_) => setState(() => _isHovering = true),
         onExit: (_) => setState(() => _isHovering = false),
@@ -1557,7 +1627,7 @@ class _VideoNodeState extends State<_VideoNode> {
     // Wrap with WebDropZone for web drag-drop support
     if (kIsWeb) {
       return WebDropZone(
-        onDrop: _handleFileDrop,
+        onDropWithUrl: _handleFileDropWithUrl,
         onDragEnter: () => setState(() => _isDragging = true),
         onDragLeave: () => setState(() => _isDragging = false),
         child: nodeWidget,
@@ -1585,6 +1655,7 @@ class _VideoNodeState extends State<_VideoNode> {
     }
 
     if (_controller != null && _controller!.value.isInitialized) {
+      final isPlaying = _controller!.value.isPlaying;
       return Container(
         height: 120,
         decoration: BoxDecoration(
@@ -1600,31 +1671,46 @@ class _VideoNodeState extends State<_VideoNode> {
                 aspectRatio: _controller!.value.aspectRatio,
                 child: VideoPlayer(_controller!),
               ),
-              // Play/Pause overlay
-              if (_isHovering)
-                GestureDetector(
-                  onTap: () {
-                    setState(() {
-                      if (_controller!.value.isPlaying) {
-                        _controller!.pause();
-                      } else {
-                        _controller!.play();
-                      }
-                    });
-                  },
-                  child: Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: Colors.black54,
-                      shape: BoxShape.circle,
-                    ),
-                    child: Icon(
-                      _controller!.value.isPlaying ? Icons.pause : Icons.play_arrow,
-                      color: Colors.white,
-                      size: 24,
-                    ),
+              // Play/Pause indicator - always visible when paused, or on hover
+              AnimatedOpacity(
+                opacity: !isPlaying || _isHovering ? 1.0 : 0.0,
+                duration: const Duration(milliseconds: 200),
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.6),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    isPlaying ? Icons.pause : Icons.play_arrow,
+                    color: Colors.white,
+                    size: 28,
                   ),
                 ),
+              ),
+              // Loop indicator
+              Positioned(
+                bottom: 4,
+                right: 4,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: Colors.black54,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.loop, color: Colors.white70, size: 12),
+                      const SizedBox(width: 2),
+                      Text(
+                        'Loop',
+                        style: TextStyle(color: Colors.white70, fontSize: 9),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
             ],
           ),
         ),

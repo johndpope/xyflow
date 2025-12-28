@@ -11,12 +11,14 @@ class WebDropZone extends StatefulWidget {
     super.key,
     required this.child,
     this.onDrop,
+    this.onDropWithUrl,
     this.onDragEnter,
     this.onDragLeave,
   });
 
   final Widget child;
   final void Function(Uint8List bytes, String name)? onDrop;
+  final void Function(String blobUrl, String name)? onDropWithUrl;
   final VoidCallback? onDragEnter;
   final VoidCallback? onDragLeave;
 
@@ -29,11 +31,59 @@ class _WebDropZoneState extends State<WebDropZone> {
   late String _viewType;
   bool _registered = false;
 
+  // Document-level listeners for detecting when drag starts/ends
+  html.EventListener? _docDragEnterListener;
+  html.EventListener? _docDragLeaveListener;
+  html.EventListener? _docDropListener;
+
   @override
   void initState() {
     super.initState();
     _viewType = 'drop-zone-${DateTime.now().millisecondsSinceEpoch}';
     _setupDropZone();
+    _setupDocumentListeners();
+  }
+
+  @override
+  void dispose() {
+    _removeDocumentListeners();
+    super.dispose();
+  }
+
+  void _setupDocumentListeners() {
+    // When drag enters the document, enable pointer events on our drop zone
+    _docDragEnterListener = (html.Event e) {
+      _dropZone.style.pointerEvents = 'auto';
+    };
+
+    // When drag leaves document or drop happens, disable pointer events
+    _docDragLeaveListener = (html.Event e) {
+      // Only disable if leaving the document entirely
+      final mouseEvent = e as html.MouseEvent;
+      if (mouseEvent.relatedTarget == null) {
+        _dropZone.style.pointerEvents = 'none';
+      }
+    };
+
+    _docDropListener = (html.Event e) {
+      _dropZone.style.pointerEvents = 'none';
+    };
+
+    html.document.addEventListener('dragenter', _docDragEnterListener);
+    html.document.addEventListener('dragleave', _docDragLeaveListener);
+    html.document.addEventListener('drop', _docDropListener);
+  }
+
+  void _removeDocumentListeners() {
+    if (_docDragEnterListener != null) {
+      html.document.removeEventListener('dragenter', _docDragEnterListener);
+    }
+    if (_docDragLeaveListener != null) {
+      html.document.removeEventListener('dragleave', _docDragLeaveListener);
+    }
+    if (_docDropListener != null) {
+      html.document.removeEventListener('drop', _docDropListener);
+    }
   }
 
   void _setupDropZone() {
@@ -43,7 +93,9 @@ class _WebDropZoneState extends State<WebDropZone> {
       ..style.position = 'absolute'
       ..style.top = '0'
       ..style.left = '0'
-      ..style.pointerEvents = 'auto';
+      // Start with pointer-events: none so clicks pass through
+      // Will be set to 'auto' when drag enters document
+      ..style.pointerEvents = 'none';
 
     _dropZone.onDragOver.listen((event) {
       event.preventDefault();
@@ -67,9 +119,21 @@ class _WebDropZoneState extends State<WebDropZone> {
       event.stopPropagation();
       widget.onDragLeave?.call();
 
+      // Disable pointer events after drop
+      _dropZone.style.pointerEvents = 'none';
+
       final files = event.dataTransfer?.files;
       if (files != null && files.isNotEmpty) {
         final file = files[0];
+
+        // If onDropWithUrl is provided, create a blob URL directly
+        if (widget.onDropWithUrl != null) {
+          final blobUrl = html.Url.createObjectUrlFromBlob(file);
+          widget.onDropWithUrl?.call(blobUrl, file.name);
+          return;
+        }
+
+        // Otherwise read as bytes
         final reader = html.FileReader();
 
         reader.onLoadEnd.listen((event) {
