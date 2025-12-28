@@ -10,6 +10,8 @@ import 'core/nodes/node_registry.dart';
 import 'core/nodes/slot_types.dart';
 import 'widgets/comfy_node_widget.dart';
 import 'widgets/comfy_edge_widget.dart';
+import 'widgets/node_search_panel.dart';
+import 'widgets/properties_panel.dart';
 
 /// Example widget demonstrating ComfyUI-style node graph editing.
 class ComfyFlowExample extends StatefulWidget {
@@ -24,6 +26,13 @@ class _ComfyFlowExampleState extends State<ComfyFlowExample> {
   late ComfyGraph _graph;
   List<Node<ComfyNodeData>> _nodes = [];
   List<Edge<ComfyEdgeData>> _edges = [];
+
+  // UI state
+  String? _selectedNodeId;
+  bool _showSearchPanel = false;
+  Offset? _searchPanelPosition;
+  List<String> _recentNodes = [];
+  bool _showPropertiesPanel = true;
 
   @override
   void initState() {
@@ -348,6 +357,62 @@ class _ComfyFlowExampleState extends State<ComfyFlowExample> {
     });
   }
 
+  ComfyNode? get _selectedNode =>
+      _selectedNodeId != null ? _graph.getNode(_selectedNodeId!) : null;
+
+  NodeDefinition? get _selectedNodeDefinition =>
+      _selectedNode != null ? _registry.get(_selectedNode!.type) : null;
+
+  void _onNodeClick(Node<ComfyNodeData> node) {
+    setState(() {
+      _selectedNodeId = node.id;
+    });
+  }
+
+  void _addNodeFromSearch(NodeDefinition def, Offset? position) {
+    setState(() {
+      final node = _graph.addNodeByType(
+        def.name,
+        position ?? const Offset(200, 200),
+      );
+      if (node != null) {
+        // Track recent nodes
+        _recentNodes.remove(def.name);
+        _recentNodes.insert(0, def.name);
+        if (_recentNodes.length > 10) {
+          _recentNodes = _recentNodes.take(10).toList();
+        }
+        _selectedNodeId = node.id;
+      }
+      _showSearchPanel = false;
+      _updateXYFlowState();
+    });
+  }
+
+  void _onWidgetValueChanged(String nodeId, String widgetName, dynamic value) {
+    setState(() {
+      _graph.updateWidgetValue(nodeId, widgetName, value);
+      _updateXYFlowState();
+    });
+  }
+
+  void _onNodePropertyChanged(String nodeId, String property, dynamic value) {
+    setState(() {
+      final node = _graph.getNode(nodeId);
+      if (node != null) {
+        switch (property) {
+          case 'title':
+            node.title = value as String;
+          case 'mode':
+            node.mode = value as int;
+          case 'collapsed':
+            node.collapsed = value as bool;
+        }
+      }
+      _updateXYFlowState();
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -358,10 +423,30 @@ class _ComfyFlowExampleState extends State<ComfyFlowExample> {
         foregroundColor: Colors.white,
         actions: [
           IconButton(
+            icon: const Icon(Icons.add),
+            onPressed: () {
+              setState(() {
+                _showSearchPanel = true;
+                _searchPanelPosition = null;
+              });
+            },
+            tooltip: 'Add Node',
+          ),
+          IconButton(
+            icon: Icon(_showPropertiesPanel ? Icons.view_sidebar : Icons.view_sidebar_outlined),
+            onPressed: () {
+              setState(() {
+                _showPropertiesPanel = !_showPropertiesPanel;
+              });
+            },
+            tooltip: 'Toggle Properties Panel',
+          ),
+          IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: () {
               setState(() {
                 _graph.clear();
+                _selectedNodeId = null;
                 _initializeGraph();
               });
             },
@@ -377,8 +462,9 @@ class _ComfyFlowExampleState extends State<ComfyFlowExample> {
                   content: Text(
                     'Nodes: ${_graph.nodeCount}\n'
                     'Edges: ${_graph.edgeCount}\n\n'
-                    'Drag nodes to reposition.\n'
-                    'Connect handles to create edges.',
+                    'Double-tap canvas to add nodes.\n'
+                    'Drag from handles to connect.\n'
+                    'Click nodes to select and edit.',
                   ),
                   actions: [
                     TextButton(
@@ -393,29 +479,77 @@ class _ComfyFlowExampleState extends State<ComfyFlowExample> {
           ),
         ],
       ),
-      body: XYFlow<ComfyNodeData, ComfyEdgeData>(
-        nodes: _nodes,
-        edges: _edges,
-        onNodesChange: _onNodesChange,
-        onConnect: _onConnect,
-        nodeTypes: {
-          'comfy': (props) => ComfyNodeWidget(props: props),
-        },
-        edgeTypes: {
-          'comfy': (props) => ComfyEdgeWidget(props: props),
-        },
-        fitViewOnInit: true,
-        minZoom: 0.1,
-        maxZoom: 4.0,
-        snapToGrid: true,
-        snapGrid: (20, 20),
-        children: const [
-          Background(
-            variant: BackgroundVariant.dots,
-            color: Color(0xFF2A2A2A),
-            gap: 20,
-            size: 1,
+      body: Row(
+        children: [
+          // Main canvas
+          Expanded(
+            child: Stack(
+              children: [
+                GestureDetector(
+                  onDoubleTapDown: (details) {
+                    setState(() {
+                      _showSearchPanel = true;
+                      _searchPanelPosition = details.localPosition;
+                    });
+                  },
+                  child: XYFlow<ComfyNodeData, ComfyEdgeData>(
+                    nodes: _nodes,
+                    edges: _edges,
+                    onNodesChange: _onNodesChange,
+                    onConnect: _onConnect,
+                    onNodeClick: _onNodeClick,
+                    nodeTypes: {
+                      'comfy': (props) => ComfyNodeWidget(props: props),
+                    },
+                    edgeTypes: {
+                      'comfy': (props) => ComfyEdgeWidget(props: props),
+                    },
+                    fitViewOnInit: true,
+                    minZoom: 0.1,
+                    maxZoom: 4.0,
+                    snapToGrid: true,
+                    snapGrid: (20, 20),
+                    children: const [
+                      Background(
+                        variant: BackgroundVariant.dots,
+                        color: Color(0xFF2A2A2A),
+                        gap: 20,
+                        size: 1,
+                      ),
+                    ],
+                  ),
+                ),
+                // Floating search panel
+                if (_showSearchPanel)
+                  FloatingNodeSearchPanel(
+                    registry: _registry,
+                    onNodeSelected: _addNodeFromSearch,
+                    position: _searchPanelPosition ?? const Offset(100, 100),
+                    recentNodes: _recentNodes,
+                    onClose: () {
+                      setState(() {
+                        _showSearchPanel = false;
+                      });
+                    },
+                  ),
+              ],
+            ),
           ),
+          // Properties panel
+          if (_showPropertiesPanel)
+            PropertiesPanel(
+              registry: _registry,
+              selectedNode: _selectedNode,
+              nodeDefinition: _selectedNodeDefinition,
+              incomingEdges: _selectedNodeId != null
+                  ? _graph.getIncomingEdges(_selectedNodeId!)
+                  : [],
+              outgoingEdges: _selectedNodeId != null
+                  ? _graph.getOutgoingEdges(_selectedNodeId!)
+                  : [],
+              onWidgetValueChanged: _onWidgetValueChanged,
+              onNodePropertyChanged: _onNodePropertyChanged,
+            ),
         ],
       ),
     );
