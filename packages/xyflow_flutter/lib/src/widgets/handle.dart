@@ -59,6 +59,8 @@ class _HandleWidgetState extends State<HandleWidget> {
   bool _isConnecting = false;
   Offset _startGlobalPosition = Offset.zero;
   String? _registeredNodeId;
+  // Cache state reference for safe disposal
+  dynamic _cachedState;
 
   @override
   void didChangeDependencies() {
@@ -78,6 +80,7 @@ class _HandleWidgetState extends State<HandleWidget> {
 
     if (state == null || nodeId == null) return;
     _registeredNodeId = nodeId;
+    _cachedState = state; // Cache for safe disposal
 
     // Schedule registration after build to get correct position
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -95,9 +98,9 @@ class _HandleWidgetState extends State<HandleWidget> {
   }
 
   void _unregisterHandle() {
-    if (_registeredNodeId == null) return;
-    final state = XYFlowProvider.maybeOfAny(context);
-    state?.unregisterHandle(_registeredNodeId!, widget.id, widget.type);
+    if (_registeredNodeId == null || _cachedState == null) return;
+    // Use cached state to avoid accessing context during dispose
+    _cachedState.unregisterHandle(_registeredNodeId!, widget.id, widget.type);
   }
 
   XYPosition? _getHandleFlowPosition() {
@@ -259,13 +262,24 @@ class _HandleWidgetState extends State<HandleWidget> {
     // Find the XYFlow render box to get local position
     // Walk up to find the flow container
     RenderBox? flowBox;
-    context.visitAncestorElements((element) {
-      if (element.widget.runtimeType.toString().contains('XYFlow')) {
-        flowBox = element.findRenderObject() as RenderBox?;
-        return false;
+    try {
+      // Check if context is still valid
+      if (context is Element && !context.mounted) {
+        return XYPosition(
+          x: (screenPosition.dx - viewport.x) / viewport.zoom,
+          y: (screenPosition.dy - viewport.y) / viewport.zoom,
+        );
       }
-      return true;
-    });
+      context.visitAncestorElements((element) {
+        if (element.widget.runtimeType.toString().contains('XYFlow')) {
+          flowBox = element.findRenderObject() as RenderBox?;
+          return false;
+        }
+        return true;
+      });
+    } catch (e) {
+      // Context may be deactivated, use fallback
+    }
 
     if (flowBox == null) {
       // Fallback: use viewport transform directly

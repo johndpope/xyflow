@@ -45,21 +45,31 @@ class XYFlowProvider<NodeData, EdgeData>
   /// This is useful for widgets like Controls and Background that need to
   /// access the state but don't know the specific NodeData/EdgeData types.
   static XYFlowState<dynamic, dynamic>? maybeOfAny(BuildContext context) {
-    final element = context.getElementForInheritedWidgetOfExactType<XYFlowProvider<dynamic, dynamic>>();
-    if (element != null) {
-      return (element.widget as XYFlowProvider<dynamic, dynamic>).notifier;
+    // Check if context is still valid (not deactivated)
+    if (context is Element && !context.mounted) {
+      return null;
     }
-    // Try to find any XYFlowProvider in the tree
-    XYFlowState<dynamic, dynamic>? result;
-    context.visitAncestorElements((element) {
-      if (element.widget is XYFlowProvider) {
-        final provider = element.widget as XYFlowProvider;
-        result = provider.notifier as XYFlowState<dynamic, dynamic>?;
-        return false; // Stop visiting
+
+    try {
+      final element = context.getElementForInheritedWidgetOfExactType<XYFlowProvider<dynamic, dynamic>>();
+      if (element != null) {
+        return (element.widget as XYFlowProvider<dynamic, dynamic>).notifier;
       }
-      return true; // Continue visiting
-    });
-    return result;
+      // Try to find any XYFlowProvider in the tree
+      XYFlowState<dynamic, dynamic>? result;
+      context.visitAncestorElements((element) {
+        if (element.widget is XYFlowProvider) {
+          final provider = element.widget as XYFlowProvider;
+          result = provider.notifier as XYFlowState<dynamic, dynamic>?;
+          return false; // Stop visiting
+        }
+        return true; // Continue visiting
+      });
+      return result;
+    } catch (e) {
+      // Context may be deactivated, return null safely
+      return null;
+    }
   }
 
   @override
