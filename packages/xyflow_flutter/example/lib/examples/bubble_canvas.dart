@@ -347,14 +347,18 @@ class _BubbleCanvasState extends State<BubbleCanvas>
   String? _expandedItemId;        // which item is currently expanding/expanded
   double _expandT = 0;            // 0 = collapsed, 1 = fully expanded
   bool _expanding = true;         // true = opening, false = closing
-  Rect _expandFromRect = Rect.zero; // source rect of the expanding item
   List<BubbleItem> _childItems = [];
   final Map<String, _BubblePhysics> _childPhysics = {};
-  double _childScrollOffset = 0;
-  double _childScrollVelocity = 0;
   bool get _isExpanded => _expandedItemId != null;
-  bool get _isFullyExpanded => _expandedItemId != null && _expandT >= 1.0;
-  double _expandCompleteTime = 0;
+
+  /// Home Y of the expanded parent (used for displacement comparison)
+  double _expandedParentHomeY = 0;
+
+  /// Total vertical space children occupy (used for displacement + virtual height)
+  double get _childDisplacementAmount {
+    if (_childItems.isEmpty) return 0;
+    return _childItems.length * (_itemHeight + widget.delegate.listSpacing) + 8;
+  }
 
   @override
   void initState() {
@@ -374,6 +378,11 @@ class _BubbleCanvasState extends State<BubbleCanvas>
       _activeMomentum.clear();
       _scrollOffset = 0;
       _scrollVelocity = 0;
+      // Clear expand state on mode change
+      _expandedItemId = null;
+      _expandT = 0;
+      _childItems = [];
+      _childPhysics.clear();
     }
     if (widget.delegate.items.length != oldWidget.delegate.items.length || modeChanged) {
       _initBubblePositions();
@@ -413,11 +422,19 @@ class _BubbleCanvasState extends State<BubbleCanvas>
   double get _virtualCanvasHeight {
     final items = widget.delegate.items;
     if (items.isEmpty) return widget.height;
+    double base;
     if (_isList) {
-      return 20.0 + items.length * (_itemHeight + _itemSpacing);
+      base = 20.0 + items.length * (_itemHeight + _itemSpacing);
+    } else {
+      final rows = (items.length / _columns).ceil();
+      base = rows * widget.delegate.rowSpacing + widget.delegate.bubbleHeight;
     }
-    final rows = (items.length / _columns).ceil();
-    return rows * widget.delegate.rowSpacing + widget.delegate.bubbleHeight;
+    // Add child space when expanded
+    if (_isExpanded) {
+      final eased = Curves.easeInOutCubic.transform(_expandT);
+      base += _childDisplacementAmount * eased;
+    }
+    return base;
   }
 
   double get _maxScroll => max(0, _virtualCanvasHeight - widget.height);
@@ -486,6 +503,14 @@ class _BubbleCanvasState extends State<BubbleCanvas>
       if (screenY + bh < -100 || screenY > widget.height + 100) continue;
       bubbleBounds.add(Rect.fromLTWH(bp.canvasX, screenY, bw, bh));
     }
+    // Include child physics in grid displacement
+    for (final entry in _childPhysics.entries) {
+      final bp = entry.value;
+      if (bp.opacity <= 0) continue;
+      final screenY = bp.canvasY - _scrollOffset;
+      if (screenY + bh < -100 || screenY > widget.height + 100) continue;
+      bubbleBounds.add(Rect.fromLTWH(bp.canvasX, screenY, bw, bh));
+    }
 
     final maxDist = _cfg.gridMaxDist;
     final pushStr = _cfg.gridPushStrength;
@@ -543,7 +568,15 @@ class _BubbleCanvasState extends State<BubbleCanvas>
     final viewW = rb?.size.width ?? 400;
     final bw = _isList ? (viewW - _gutterX - 60) : widget.delegate.bubbleWidth;
     final bh = _itemHeight;
-    // Reverse order so topmost (last drawn) is hit first
+    // Check child physics first (they render on top)
+    for (final child in _childItems.reversed) {
+      final bp = _childPhysics[child.id];
+      if (bp == null || bp.opacity <= 0) continue;
+      final screenY = bp.canvasY - _scrollOffset;
+      final rect = Rect.fromLTWH(bp.canvasX, screenY, bw, bh);
+      if (rect.contains(localPos)) return child.id;
+    }
+    // Then check main items (reverse order so topmost is hit first)
     for (final item in widget.delegate.items.reversed) {
       final bp = _bubblePhysics[item.id];
       if (bp == null) continue;
@@ -558,20 +591,21 @@ class _BubbleCanvasState extends State<BubbleCanvas>
   final List<_VelocitySample> _scrollSamples = [];
 
   void _onPanStart(DragStartDetails details) {
-    // Block interactions during expand/collapse animation
-    if (_isExpanded && !_isFullyExpanded) return;
-
-    // When fully expanded, pan gestures scroll children
-    if (_isFullyExpanded) {
-      if (details.localPosition.dy < 52) return; // header area
-      _isScrolling = true;
-      _scrollSamples.clear();
-      _scrollSamples.add(_VelocitySample(details.localPosition, DateTime.now().millisecondsSinceEpoch));
-      return;
-    }
+    // Block interactions during expand/collapse animation (mid-transition)
+    if (_isExpanded && _expandT > 0 && _expandT < 1) return;
 
     final hitId = _hitTestBubble(details.localPosition);
     if (hitId != null) {
+      // Check if it's a child item (not draggable, just ignore)
+      if (_childPhysics.containsKey(hitId)) {
+        // Start scroll instead
+        _isScrolling = true;
+        _scrollVelocity = 0;
+        _scrollSamples.clear();
+        _scrollSamples.add(_VelocitySample(details.localPosition, DateTime.now().millisecondsSinceEpoch));
+        return;
+      }
+
       // Check disclosure zone (rightmost 44px in list mode)
       if (_isList) {
         final bp = _bubblePhysics[hitId]!;
@@ -580,12 +614,24 @@ class _BubbleCanvasState extends State<BubbleCanvas>
         final bw = viewW - _gutterX - 60;
         final rightEdge = bp.canvasX + bw;
         if (details.localPosition.dx > rightEdge - 44) {
-          final item = widget.delegate.items.firstWhere((i) => i.id == hitId);
-          _expandItem(item, bp, bw);
+          if (_expandedItemId == hitId) {
+            // Tapping disclosure on expanded parent → collapse
+            _collapseExpanded();
+          } else {
+            // Tapping disclosure on a different item
+            if (_isExpanded) {
+              // Collapse current first, then expand new after animation
+              _collapseExpanded();
+              // We'll let the collapse complete, and user can tap again
+            } else {
+              final item = widget.delegate.items.firstWhere((i) => i.id == hitId);
+              _expandItem(item, bp, bw);
+            }
+          }
           return;
         }
       }
-      // Start item drag
+      // Start item drag (but not if this item is the expanded parent)
       _draggingItemId = hitId;
       final bp = _bubblePhysics[hitId]!;
       _dragStartCanvasPos = Offset(bp.canvasX, bp.canvasY);
@@ -702,16 +748,9 @@ class _BubbleCanvasState extends State<BubbleCanvas>
     _scrollSamples.removeWhere((s) => s.timestamp < cutoff);
     while (_scrollSamples.length > 9) _scrollSamples.removeAt(0);
 
-    if (_isFullyExpanded) {
-      final maxChildScroll = max(0.0, _childItems.length * (_itemHeight + widget.delegate.listSpacing) + 20 - (widget.height - 60));
-      setState(() {
-        _childScrollOffset = (_childScrollOffset - details.delta.dy).clamp(0, maxChildScroll);
-      });
-    } else {
-      setState(() {
-        _scrollOffset = (_scrollOffset - details.delta.dy).clamp(0, _maxScroll);
-      });
-    }
+    setState(() {
+      _scrollOffset = (_scrollOffset - details.delta.dy).clamp(0, _maxScroll);
+    });
   }
 
   void _onScrollEnd(DragEndDetails details) {
@@ -731,11 +770,7 @@ class _BubbleCanvasState extends State<BubbleCanvas>
       if (totalWeight > 0) {
         vy /= totalWeight;
         if (vy.abs() > 150) {
-          if (_isFullyExpanded) {
-            _childScrollVelocity = -vy;
-          } else {
-            _scrollVelocity = -vy; // negative because drag-up = scroll-down
-          }
+          _scrollVelocity = -vy; // negative because drag-up = scroll-down
         }
       }
     }
@@ -744,19 +779,10 @@ class _BubbleCanvasState extends State<BubbleCanvas>
 
   void _onPointerSignal(PointerSignalEvent event) {
     if (event is PointerScrollEvent) {
-      if (_isFullyExpanded) {
-        // Scroll child list
-        final maxChildScroll = max(0.0, _childItems.length * (_itemHeight + widget.delegate.listSpacing) + 20 - (widget.height - 60));
-        setState(() {
-          _childScrollOffset = (_childScrollOffset + event.scrollDelta.dy).clamp(0, maxChildScroll);
-        });
-        _childScrollVelocity = event.scrollDelta.dy * 2;
-      } else if (!_isExpanded) {
-        setState(() {
-          _scrollOffset = (_scrollOffset + event.scrollDelta.dy).clamp(0, _maxScroll);
-        });
-        _scrollVelocity = event.scrollDelta.dy * 2;
-      }
+      setState(() {
+        _scrollOffset = (_scrollOffset + event.scrollDelta.dy).clamp(0, _maxScroll);
+      });
+      _scrollVelocity = event.scrollDelta.dy * 2;
     }
   }
 
@@ -765,15 +791,12 @@ class _BubbleCanvasState extends State<BubbleCanvas>
   // ══════════════════════════════════════════════════════════════════════════════
 
   void _expandItem(BubbleItem item, _BubblePhysics bp, double itemWidth) {
-    final screenY = bp.canvasY - _scrollOffset;
-    _expandFromRect = Rect.fromLTWH(bp.canvasX, screenY, itemWidth, _itemHeight);
     _expandedItemId = item.id;
+    _expandedParentHomeY = bp.canvasY;
     _expandT = 0;
     _expanding = true;
     _childItems = [];
     _childPhysics.clear();
-    _childScrollOffset = 0;
-    _childScrollVelocity = 0;
 
     // Generate child items
     final rng = Random(item.id.hashCode);
@@ -788,6 +811,18 @@ class _BubbleCanvasState extends State<BubbleCanvas>
         accentColor: item.accentColor,
       );
     });
+
+    // Create child physics entries on the canvas below the parent
+    final childStartY = bp.canvasY + _itemHeight + widget.delegate.listSpacing;
+    for (var i = 0; i < _childItems.length; i++) {
+      final child = _childItems[i];
+      _childPhysics[child.id] = _BubblePhysics(
+        canvasX: bp.canvasX,
+        canvasY: childStartY + i * (_itemHeight + widget.delegate.listSpacing),
+        accentColor: child.accentColor ?? bp.accentColor,
+        staggerDelay: i * 0.06,
+      );
+    }
 
     _Sound.playSpawn();
     setState(() {});
@@ -861,30 +896,19 @@ class _BubbleCanvasState extends State<BubbleCanvas>
     // ── Expand/collapse animation ──
     if (_isExpanded) {
       if (_expanding) {
-        final prevT = _expandT;
         _expandT = min(1.0, _expandT + dt * 3.3); // ~300ms
-        if (prevT < 1.0 && _expandT >= 1.0) {
-          _expandCompleteTime = _tickerSeconds;
-          _Sound.playSpawn();
-        }
       } else {
         _expandT = max(0.0, _expandT - dt * 4.0); // ~250ms collapse
         if (_expandT <= 0) {
           _expandedItemId = null;
           _childItems = [];
           _childPhysics.clear();
-          _expandCompleteTime = 0;
         }
       }
-      needsRebuild = true;
-    }
-
-    // Child scroll momentum
-    if (_isFullyExpanded && _childScrollVelocity.abs() > 1) {
-      final maxChildScroll = max(0.0, _childItems.length * (_itemHeight + widget.delegate.listSpacing) + 20 - (widget.height - 60));
-      _childScrollOffset = (_childScrollOffset + _childScrollVelocity * dt).clamp(0.0, maxChildScroll);
-      _childScrollVelocity *= _cfg.baseFriction;
-      if (_childScrollVelocity.abs() < 1) _childScrollVelocity = 0;
+      // Step displacement physics for siblings
+      _stepDisplacement();
+      // Step child entry/fadeout
+      _stepChildPhysics(dt);
       needsRebuild = true;
     }
 
@@ -933,6 +957,71 @@ class _BubbleCanvasState extends State<BubbleCanvas>
         bp.spawnTime = _tickerSeconds;
         bp.opacity = 0.0;
         _Sound.playSpawn();
+      }
+    }
+  }
+
+  /// Spring-displace siblings below the expanded parent
+  void _stepDisplacement() {
+    if (!_isExpanded) return;
+    final eased = Curves.easeInOutCubic.transform(_expandT);
+    final displacement = _childDisplacementAmount * eased;
+    final items = widget.delegate.items;
+
+    for (var i = 0; i < items.length; i++) {
+      final item = items[i];
+      if (item.id == _expandedItemId) continue;
+      final bp = _bubblePhysics[item.id];
+      if (bp == null) continue;
+      // Skip items being dragged or in momentum
+      if (_draggingItemId == item.id || _activeMomentum.containsKey(item.id)) continue;
+
+      final homePos = _positionForIndex(i);
+      // Displace items whose home Y is below the parent
+      if (homePos.dy > _expandedParentHomeY) {
+        final targetY = homePos.dy + displacement;
+        // Spring toward target (critically damped feel)
+        bp.canvasY += (targetY - bp.canvasY) * 0.12;
+      } else {
+        // Spring back to home for items above
+        bp.canvasY += (homePos.dy - bp.canvasY) * 0.12;
+      }
+      // Always spring X back to home
+      bp.canvasX += (homePos.dx - bp.canvasX) * 0.12;
+    }
+  }
+
+  /// Manage child bubble viewport entry and collapse fadeout
+  void _stepChildPhysics(double dt) {
+    if (_childPhysics.isEmpty) return;
+    final bh = _itemHeight;
+
+    if (_expanding) {
+      // Children: check viewport entry with stagger delay
+      for (final child in _childItems) {
+        final bp = _childPhysics[child.id];
+        if (bp == null || bp.hasEnteredViewport) continue;
+        final screenY = bp.canvasY - _scrollOffset;
+        if (screenY + bh > 0 && screenY < widget.height) {
+          if (bp.staggerDelay > 0) {
+            bp.staggerDelay -= 1.0 / 60.0;
+            continue;
+          }
+          bp.hasEnteredViewport = true;
+          bp.spawnTime = _tickerSeconds;
+          bp.opacity = 0.0;
+        }
+      }
+      // Fade in children that have entered viewport
+      for (final bp in _childPhysics.values) {
+        if (bp.hasEnteredViewport && bp.opacity < 1.0) {
+          bp.opacity = min(1.0, bp.opacity + dt * 4); // ~250ms fade
+        }
+      }
+    } else {
+      // Collapsing: fade out children (~200ms)
+      for (final bp in _childPhysics.values) {
+        bp.opacity = max(0.0, bp.opacity - dt * 5);
       }
     }
   }
@@ -1017,7 +1106,8 @@ class _BubbleCanvasState extends State<BubbleCanvas>
     for (final id in toRemove) _activeMomentum.remove(id);
 
     // Collision detection O(n²) — fine for <100 visible items
-    _resolveCollisions();
+    // Disable during expand to prevent fighting with displacement spring
+    if (!_isExpanded) _resolveCollisions();
   }
 
   void _resolveCollisions() {
@@ -1189,12 +1279,9 @@ class _BubbleCanvasState extends State<BubbleCanvas>
     final bw = _isList ? (viewW - _gutterX - 60) : widget.delegate.bubbleWidth;
     final bh = _itemHeight;
 
-    if (_isExpanded) {
-      return _buildExpandedView(items, viewW, bw, bh);
-    }
-
     final result = <Widget>[];
 
+    // Render all main items (including the expanded parent)
     for (final item in items) {
       final bp = _bubblePhysics[item.id];
       if (bp == null) continue;
@@ -1205,6 +1292,7 @@ class _BubbleCanvasState extends State<BubbleCanvas>
       if (!bp.hasEnteredViewport) continue;
 
       final isDragging = _draggingItemId == item.id;
+      final isExpandedParent = item.id == _expandedItemId;
       final spawnT = bp.spawnTime > 0
           ? min(1.0, (_tickerSeconds - bp.spawnTime) / 0.3)
           : 1.0;
@@ -1221,6 +1309,7 @@ class _BubbleCanvasState extends State<BubbleCanvas>
           item: item,
           isDragging: isDragging,
           accentColor: bp.accentColor,
+          isExpandedParent: isExpandedParent,
         );
       } else {
         child = _DefaultBubbleWidget(
@@ -1245,203 +1334,80 @@ class _BubbleCanvasState extends State<BubbleCanvas>
           ),
         ),
       );
-    }
 
-    return result;
-  }
+      // Inject children right after the expanded parent
+      if (isExpandedParent && _childPhysics.isNotEmpty) {
+        for (final childItem in _childItems) {
+          final cbp = _childPhysics[childItem.id];
+          if (cbp == null || cbp.opacity <= 0) continue;
+          final childScreenY = cbp.canvasY - _scrollOffset;
+          if (childScreenY + bh < -50 || childScreenY > widget.height + 50) continue;
+          if (!cbp.hasEnteredViewport) continue;
 
-  // ════════════════════════════════════════════════════════════════════════════
-  // Expanded view rendering
-  // ════════════════════════════════════════════════════════════════════════════
+          final childSpawnT = cbp.spawnTime > 0
+              ? min(1.0, (_tickerSeconds - cbp.spawnTime) / 0.3)
+              : 1.0;
+          final childSlideX = (1.0 - Curves.easeOutCubic.transform(childSpawnT)) * -60;
 
-  List<Widget> _buildExpandedView(List<BubbleItem> items, double viewW, double bw, double bh) {
-    final result = <Widget>[];
-    final t = Curves.easeInOutCubic.transform(_expandT);
-
-    // Faded background items (visible during animation, hidden when fully expanded)
-    if (_expandT < 1.0) {
-      for (final item in items) {
-        if (item.id == _expandedItemId) continue;
-        final bp = _bubblePhysics[item.id];
-        if (bp == null || !bp.hasEnteredViewport) continue;
-        final screenY = bp.canvasY - _scrollOffset;
-        if (screenY + bh < -50 || screenY > widget.height + 50) continue;
-
-        Widget child = _isList
-            ? _DefaultListBubbleWidget(item: item, isDragging: false, accentColor: bp.accentColor)
-            : _DefaultBubbleWidget(item: item, isDragging: false, accentColor: bp.accentColor);
-
-        result.add(Positioned(
-          left: bp.canvasX,
-          top: screenY,
-          width: bw,
-          height: bh,
-          child: Opacity(
-            opacity: ((1.0 - t) * bp.opacity).clamp(0.0, 1.0),
-            child: child,
-          ),
-        ));
+          result.add(
+            Positioned(
+              left: cbp.canvasX + childSlideX,
+              top: childScreenY,
+              width: bw,
+              height: bh,
+              child: Opacity(
+                opacity: cbp.opacity.clamp(0.0, 1.0),
+                child: _DefaultListBubbleWidget(
+                  item: childItem,
+                  isDragging: false,
+                  accentColor: cbp.accentColor,
+                ),
+              ),
+            ),
+          );
+        }
       }
     }
 
-    // The expanding container — lerps from source rect to full viewport
-    final expandBp = _bubblePhysics[_expandedItemId];
-    if (expandBp == null) return result;
-    final expandItem = items.firstWhere(
-      (i) => i.id == _expandedItemId,
-      orElse: () => items.first,
-    );
+    // Back button (floating near expanded parent)
+    if (_isExpanded && _expandT > 0.3) {
+      final parentBp = _bubblePhysics[_expandedItemId];
+      if (parentBp != null) {
+        final parentScreenY = parentBp.canvasY - _scrollOffset;
+        final backX = max(4.0, parentBp.canvasX - 36);
+        final backOpacity = ((_expandT - 0.3) / 0.2).clamp(0.0, 1.0);
 
-    final targetRect = Rect.fromLTWH(0, 0, viewW, widget.height);
-    final currentRect = Rect.lerp(_expandFromRect, targetRect, t)!;
-    final borderR = _S.borderRadius * (1.0 - t * 0.8);
-
-    result.add(Positioned(
-      left: currentRect.left,
-      top: currentRect.top,
-      width: currentRect.width,
-      height: currentRect.height,
-      child: Container(
-        decoration: BoxDecoration(
-          color: _S.canvasBg,
-          borderRadius: BorderRadius.circular(borderR),
-          border: Border.all(
-            color: expandBp.accentColor.withValues(alpha: 0.3 + t * 0.2),
-            width: 1,
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: (expandBp.accentColor).withValues(alpha: 0.25 + t * 0.3),
-              offset: Offset(0, 24 + t * 8),
-              blurRadius: 24 + t * 16,
-              spreadRadius: -12 + t * 4,
-            ),
-          ],
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(borderR),
-          child: _expandT >= 0.8
-              ? _buildExpandedContent(expandItem, expandBp, viewW)
-              : null,
-        ),
-      ),
-    ));
-
-    return result;
-  }
-
-  Widget _buildExpandedContent(BubbleItem parent, _BubblePhysics bp, double viewW) {
-    final contentOpacity = ((_expandT - 0.8) / 0.2).clamp(0.0, 1.0);
-    const headerHeight = 52.0;
-
-    return Opacity(
-      opacity: contentOpacity,
-      child: Column(
-        children: [
-          // Header with back button
-          Container(
-            height: headerHeight,
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            decoration: BoxDecoration(
-              color: _S.surface,
-              border: Border(
-                bottom: BorderSide(color: bp.accentColor.withValues(alpha: 0.3)),
-              ),
-            ),
-            child: Row(
-              children: [
-                GestureDetector(
-                  onTap: _collapseExpanded,
-                  child: Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: _S.surfaceLight,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: const Icon(Icons.arrow_back, color: _S.textPrimary, size: 20),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Container(
-                  width: 4,
-                  height: 28,
+        result.add(
+          Positioned(
+            left: backX,
+            top: parentScreenY + (_itemHeight / 2) - 16,
+            width: 32,
+            height: 32,
+            child: Opacity(
+              opacity: backOpacity,
+              child: GestureDetector(
+                onTap: _collapseExpanded,
+                child: Container(
                   decoration: BoxDecoration(
-                    color: bp.accentColor,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        parent.title ?? parent.id,
-                        style: const TextStyle(
-                          color: _S.textPrimary,
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      Text(
-                        '${_childItems.length} items',
-                        style: const TextStyle(color: _S.textSecondary, fontSize: 12),
+                    color: _S.surface,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: (parentBp.accentColor).withValues(alpha: 0.5),
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: parentBp.accentColor.withValues(alpha: 0.3),
+                        blurRadius: 8,
                       ),
                     ],
                   ),
+                  child: const Icon(Icons.arrow_back, color: _S.textPrimary, size: 16),
                 ),
-              ],
-            ),
-          ),
-          // Child items list
-          Expanded(
-            child: ClipRect(
-              child: Stack(
-                children: _buildChildBubbles(viewW - 32),
               ),
             ),
           ),
-        ],
-      ),
-    );
-  }
-
-  List<Widget> _buildChildBubbles(double bw) {
-    final result = <Widget>[];
-    final itemH = _itemHeight;
-    final spacing = widget.delegate.listSpacing;
-
-    for (var i = 0; i < _childItems.length; i++) {
-      final child = _childItems[i];
-      final y = 10.0 + i * (itemH + spacing) - _childScrollOffset;
-
-      // Cull off-screen
-      if (y + itemH < -50 || y > widget.height) continue;
-
-      // Stagger animation from expand complete time
-      final staggerDelay = i * 0.06;
-      final elapsed = _expandCompleteTime > 0 ? _tickerSeconds - _expandCompleteTime : 0.0;
-      final itemT = ((elapsed - staggerDelay) / 0.3).clamp(0.0, 1.0);
-      final slideX = (1.0 - Curves.easeOutCubic.transform(itemT)) * -40;
-
-      result.add(Positioned(
-        left: 16 + slideX,
-        top: y,
-        width: bw,
-        height: itemH,
-        child: Opacity(
-          opacity: itemT,
-          child: _DefaultListBubbleWidget(
-            item: child,
-            isDragging: false,
-            accentColor: child.accentColor ?? _S.accents[i % _S.accents.length],
-          ),
-        ),
-      ));
+        );
+      }
     }
 
     return result;
@@ -1837,29 +1803,38 @@ class _DefaultListBubbleWidget extends StatelessWidget {
     required this.item,
     required this.isDragging,
     required this.accentColor,
+    this.isExpandedParent = false,
   });
   final BubbleItem item;
   final bool isDragging;
   final Color accentColor;
+  final bool isExpandedParent;
 
   @override
   Widget build(BuildContext context) {
+    final highlighted = isDragging || isExpandedParent;
     return AnimatedContainer(
       duration: const Duration(milliseconds: 150),
       decoration: BoxDecoration(
         color: _S.surface,
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
-          color: isDragging ? accentColor : _S.border,
-          width: isDragging ? 2 : 1,
+          color: highlighted ? accentColor : _S.border,
+          width: highlighted ? 2 : 1,
         ),
         boxShadow: [
           BoxShadow(
-            color: (isDragging ? accentColor : Colors.black).withValues(alpha: isDragging ? 0.55 : 0.25),
-            offset: Offset(0, isDragging ? 32 : 24),
-            blurRadius: isDragging ? 40 : 24,
-            spreadRadius: isDragging ? -8 : -12,
+            color: (highlighted ? accentColor : Colors.black).withValues(alpha: highlighted ? 0.55 : 0.25),
+            offset: Offset(0, highlighted ? 32 : 24),
+            blurRadius: highlighted ? 40 : 24,
+            spreadRadius: highlighted ? -8 : -12,
           ),
+          if (isExpandedParent)
+            BoxShadow(
+              color: accentColor.withValues(alpha: 0.2),
+              blurRadius: 16,
+              spreadRadius: 2,
+            ),
         ],
       ),
       child: Row(
@@ -1954,8 +1929,10 @@ class _DefaultListBubbleWidget extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.only(right: 10),
             child: Icon(
-              Icons.chevron_right,
-              color: _S.textSecondary.withValues(alpha: 0.6),
+              isExpandedParent ? Icons.expand_less : Icons.chevron_right,
+              color: isExpandedParent
+                  ? accentColor.withValues(alpha: 0.8)
+                  : _S.textSecondary.withValues(alpha: 0.6),
               size: 22,
             ),
           ),
