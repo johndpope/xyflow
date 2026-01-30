@@ -626,34 +626,46 @@ class _BubbleCanvasState extends State<BubbleCanvas>
         return;
       }
 
-      // Check disclosure zone (rightmost 44px in list mode)
+      // Check disclosure zone
+      final bp = _bubblePhysics[hitId]!;
+      final rb2 = _canvasKey.currentContext?.findRenderObject() as RenderBox?;
+      final viewW2 = rb2?.size.width ?? 400;
+      bool hitDisclosure = false;
+
       if (_isList) {
-        final bp = _bubblePhysics[hitId]!;
-        final rb = _canvasKey.currentContext?.findRenderObject() as RenderBox?;
-        final viewW = rb?.size.width ?? 400;
-        final bw = viewW - _gutterX - 60;
-        final rightEdge = bp.canvasX + bw;
-        if (details.localPosition.dx > rightEdge - 44) {
-          if (_expandedItemId == hitId) {
-            // Tapping disclosure on expanded parent → collapse
+        // List mode: rightmost 44px is the disclosure zone
+        final bw2 = viewW2 - _gutterX - 60;
+        final rightEdge = bp.canvasX + bw2;
+        hitDisclosure = details.localPosition.dx > rightEdge - 44;
+      } else {
+        // Grid mode: bottom-right 36x36 corner is the disclosure zone
+        final screenY = bp.canvasY - _scrollOffset;
+        final rightEdge = bp.canvasX + widget.delegate.bubbleWidth;
+        final bottomEdge = screenY + _itemHeight;
+        hitDisclosure = details.localPosition.dx > rightEdge - 36 &&
+            details.localPosition.dy > bottomEdge - 36;
+      }
+
+      if (hitDisclosure) {
+        final bw2 = _isList ? (viewW2 - _gutterX - 60) : widget.delegate.bubbleWidth;
+        if (_expandedItemId == hitId) {
+          // Tapping disclosure on expanded parent → collapse
+          _collapseExpanded();
+        } else {
+          // Tapping disclosure on a different item
+          if (_isExpanded) {
+            // Collapse current first, then expand new after animation
             _collapseExpanded();
+            // We'll let the collapse complete, and user can tap again
           } else {
-            // Tapping disclosure on a different item
-            if (_isExpanded) {
-              // Collapse current first, then expand new after animation
-              _collapseExpanded();
-              // We'll let the collapse complete, and user can tap again
-            } else {
-              final item = widget.delegate.items.firstWhere((i) => i.id == hitId);
-              _expandItem(item, bp, bw);
-            }
+            final item = widget.delegate.items.firstWhere((i) => i.id == hitId);
+            _expandItem(item, bp, bw2);
           }
-          return;
         }
+        return;
       }
       // Start item drag (but not if this item is the expanded parent)
       _draggingItemId = hitId;
-      final bp = _bubblePhysics[hitId]!;
       _dragStartCanvasPos = Offset(bp.canvasX, bp.canvasY);
       _activeMomentum.remove(hitId);
       _velocitySamples[hitId] = [];
@@ -1395,6 +1407,7 @@ class _BubbleCanvasState extends State<BubbleCanvas>
           item: item,
           isDragging: isDragging,
           accentColor: bp.accentColor,
+          isExpandedParent: isExpandedParent,
         );
       }
 
@@ -1771,133 +1784,168 @@ class _DefaultBubbleWidget extends StatelessWidget {
     required this.item,
     required this.isDragging,
     required this.accentColor,
+    this.isExpandedParent = false,
   });
   final BubbleItem item;
   final bool isDragging;
   final Color accentColor;
+  final bool isExpandedParent;
 
   @override
   Widget build(BuildContext context) {
+    final highlighted = isDragging || isExpandedParent;
     return AnimatedContainer(
       duration: const Duration(milliseconds: 150),
       decoration: BoxDecoration(
         color: _S.surface,
         borderRadius: BorderRadius.circular(_S.borderRadius),
         border: Border.all(
-          color: isDragging ? accentColor : _S.border,
-          width: isDragging ? 2 : 1,
+          color: highlighted ? accentColor : _S.border,
+          width: highlighted ? 2 : 1,
         ),
         boxShadow: [
           BoxShadow(
-            color: (isDragging ? accentColor : Colors.black).withValues(alpha: isDragging ? 0.55 : 0.25),
-            offset: Offset(0, isDragging ? 32 : 24),
-            blurRadius: isDragging ? 40 : 24,
-            spreadRadius: isDragging ? -8 : -12,
+            color: (highlighted ? accentColor : Colors.black).withValues(alpha: highlighted ? 0.55 : 0.25),
+            offset: Offset(0, highlighted ? 32 : 24),
+            blurRadius: highlighted ? 40 : 24,
+            spreadRadius: highlighted ? -8 : -12,
           ),
+          if (isExpandedParent)
+            BoxShadow(
+              color: accentColor.withValues(alpha: 0.2),
+              blurRadius: 16,
+              spreadRadius: 2,
+            ),
         ],
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+      child: Stack(
         children: [
-          // Accent header bar
-          Container(
-            height: 4,
-            decoration: BoxDecoration(
-              color: accentColor,
-              borderRadius: const BorderRadius.only(
-                topLeft: Radius.circular(_S.borderRadius - 1),
-                topRight: Radius.circular(_S.borderRadius - 1),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Accent header bar
+              Container(
+                height: 4,
+                decoration: BoxDecoration(
+                  color: accentColor,
+                  borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(_S.borderRadius - 1),
+                    topRight: Radius.circular(_S.borderRadius - 1),
+                  ),
+                ),
               ),
-            ),
-          ),
-          // Image area
-          Expanded(
-            child: ClipRRect(
-              borderRadius: const BorderRadius.only(
-                bottomLeft: Radius.circular(_S.borderRadius - 1),
-                bottomRight: Radius.circular(_S.borderRadius - 1),
-              ),
-              child: item.imageUrl != null
-                  ? Image.network(
-                      item.imageUrl!,
-                      fit: BoxFit.cover,
-                      loadingBuilder: (context, child, loadingProgress) {
-                        if (loadingProgress == null) return child;
-                        final progress = loadingProgress.expectedTotalBytes != null
-                            ? loadingProgress.cumulativeBytesLoaded /
-                                loadingProgress.expectedTotalBytes!
-                            : null;
-                        return Container(
-                          color: _S.surfaceLight,
-                          child: Center(
-                            child: SizedBox(
-                              width: 24,
-                              height: 24,
-                              child: CircularProgressIndicator(
-                                value: progress,
-                                strokeWidth: 2,
-                                color: accentColor.withValues(alpha: 0.5),
+              // Image area
+              Expanded(
+                child: ClipRRect(
+                  borderRadius: const BorderRadius.only(
+                    bottomLeft: Radius.circular(_S.borderRadius - 1),
+                    bottomRight: Radius.circular(_S.borderRadius - 1),
+                  ),
+                  child: item.imageUrl != null
+                      ? Image.network(
+                          item.imageUrl!,
+                          fit: BoxFit.cover,
+                          loadingBuilder: (context, child, loadingProgress) {
+                            if (loadingProgress == null) return child;
+                            final progress = loadingProgress.expectedTotalBytes != null
+                                ? loadingProgress.cumulativeBytesLoaded /
+                                    loadingProgress.expectedTotalBytes!
+                                : null;
+                            return Container(
+                              color: _S.surfaceLight,
+                              child: Center(
+                                child: SizedBox(
+                                  width: 24,
+                                  height: 24,
+                                  child: CircularProgressIndicator(
+                                    value: progress,
+                                    strokeWidth: 2,
+                                    color: accentColor.withValues(alpha: 0.5),
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                          errorBuilder: (context, error, stackTrace) => Container(
+                            color: _S.surfaceLight,
+                            child: Center(
+                              child: Icon(
+                                Icons.broken_image_outlined,
+                                color: _S.textSecondary.withValues(alpha: 0.5),
+                                size: 32,
                               ),
                             ),
                           ),
-                        );
-                      },
-                      errorBuilder: (context, error, stackTrace) => Container(
-                        color: _S.surfaceLight,
-                        child: Center(
-                          child: Icon(
-                            Icons.broken_image_outlined,
-                            color: _S.textSecondary.withValues(alpha: 0.5),
-                            size: 32,
+                        )
+                      : Container(
+                          color: _S.surfaceLight,
+                          child: Center(
+                            child: Icon(
+                              Icons.image_outlined,
+                              color: accentColor.withValues(alpha: 0.3),
+                              size: 40,
+                            ),
                           ),
                         ),
-                      ),
-                    )
-                  : Container(
-                      color: _S.surfaceLight,
-                      child: Center(
-                        child: Icon(
-                          Icons.image_outlined,
-                          color: accentColor.withValues(alpha: 0.3),
-                          size: 40,
+                ),
+              ),
+              // Title + subtitle
+              if (item.title != null || item.subtitle != null)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (item.title != null)
+                        Text(
+                          item.title!,
+                          style: const TextStyle(
+                            color: _S.textPrimary,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
-                      ),
-                    ),
-            ),
+                      if (item.subtitle != null) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          item.subtitle!,
+                          style: const TextStyle(
+                            color: _S.textSecondary,
+                            fontSize: 11,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+            ],
           ),
-          // Title + subtitle
-          if (item.title != null || item.subtitle != null)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (item.title != null)
-                    Text(
-                      item.title!,
-                      style: const TextStyle(
-                        color: _S.textPrimary,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  if (item.subtitle != null) ...[
-                    const SizedBox(height: 2),
-                    Text(
-                      item.subtitle!,
-                      style: const TextStyle(
-                        color: _S.textSecondary,
-                        fontSize: 11,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
-                ],
+          // Disclosure icon in bottom-right corner
+          Positioned(
+            right: 4,
+            bottom: 4,
+            child: Container(
+              width: 28,
+              height: 28,
+              decoration: BoxDecoration(
+                color: (isExpandedParent ? accentColor : _S.surface).withValues(alpha: 0.85),
+                borderRadius: BorderRadius.circular(7),
+                border: Border.all(
+                  color: isExpandedParent ? accentColor : _S.border,
+                  width: 1,
+                ),
+              ),
+              child: Icon(
+                isExpandedParent ? Icons.expand_less : Icons.expand_more,
+                color: isExpandedParent ? Colors.white : _S.textSecondary,
+                size: 18,
               ),
             ),
+          ),
         ],
       ),
     );
