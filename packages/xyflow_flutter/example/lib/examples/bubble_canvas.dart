@@ -276,6 +276,9 @@ class _BubblePhysics {
   double spawnTime = -1;
   double bounceScale = 1.0;
   double opacity = 0.0;
+  /// For pop-entry: the Y offset from which the item drops (screen-space).
+  /// Starts negative (above viewport), springs toward 0.
+  double popOffsetY = 0;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -289,11 +292,14 @@ class BubbleCanvas extends StatefulWidget {
     this.height = 600,
     this.soundEnabled = true,
     this.showGrid = true,
+    this.popEntry = false,
   });
   final BubbleCanvasDelegate delegate;
   final double height;
   final bool soundEnabled;
   final bool showGrid;
+  /// When true, items drop from the top of the viewport and pop into place
+  final bool popEntry;
 
   @override
   State<BubbleCanvas> createState() => _BubbleCanvasState();
@@ -354,10 +360,18 @@ class _BubbleCanvasState extends State<BubbleCanvas>
   /// Home Y of the expanded parent (used for displacement comparison)
   double _expandedParentHomeY = 0;
 
+  /// Number of columns for child grid layout (1 = list, >1 = grid)
+  int _childColumns = 1;
+
   /// Total vertical space children occupy (used for displacement + virtual height)
   double get _childDisplacementAmount {
     if (_childItems.isEmpty) return 0;
-    return _childItems.length * (_itemHeight + widget.delegate.listSpacing) + 8;
+    final rows = (_childItems.length / _childColumns).ceil();
+    if (_childColumns > 1) {
+      // Grid mode: use bubble height + row spacing
+      return rows * widget.delegate.rowSpacing + 8;
+    }
+    return rows * (_itemHeight + widget.delegate.listSpacing) + 8;
   }
 
   @override
@@ -504,12 +518,15 @@ class _BubbleCanvasState extends State<BubbleCanvas>
       bubbleBounds.add(Rect.fromLTWH(bp.canvasX, screenY, bw, bh));
     }
     // Include child physics in grid displacement
+    final childIsGrid = _childColumns > 1;
+    final childBw = childIsGrid ? widget.delegate.bubbleWidth : bw;
+    final childBh = childIsGrid ? widget.delegate.bubbleHeight : bh;
     for (final entry in _childPhysics.entries) {
       final bp = entry.value;
       if (bp.opacity <= 0) continue;
       final screenY = bp.canvasY - _scrollOffset;
-      if (screenY + bh < -100 || screenY > widget.height + 100) continue;
-      bubbleBounds.add(Rect.fromLTWH(bp.canvasX, screenY, bw, bh));
+      if (screenY + childBh < -100 || screenY > widget.height + 100) continue;
+      bubbleBounds.add(Rect.fromLTWH(bp.canvasX, screenY, childBw, childBh));
     }
 
     final maxDist = _cfg.gridMaxDist;
@@ -569,11 +586,14 @@ class _BubbleCanvasState extends State<BubbleCanvas>
     final bw = _isList ? (viewW - _gutterX - 60) : widget.delegate.bubbleWidth;
     final bh = _itemHeight;
     // Check child physics first (they render on top)
+    final childIsGrid = _childColumns > 1;
+    final childHitW = childIsGrid ? widget.delegate.bubbleWidth : bw;
+    final childHitH = childIsGrid ? widget.delegate.bubbleHeight : bh;
     for (final child in _childItems.reversed) {
       final bp = _childPhysics[child.id];
       if (bp == null || bp.opacity <= 0) continue;
       final screenY = bp.canvasY - _scrollOffset;
-      final rect = Rect.fromLTWH(bp.canvasX, screenY, bw, bh);
+      final rect = Rect.fromLTWH(bp.canvasX, screenY, childHitW, childHitH);
       if (rect.contains(localPos)) return child.id;
     }
     // Then check main items (reverse order so topmost is hit first)
@@ -798,6 +818,10 @@ class _BubbleCanvasState extends State<BubbleCanvas>
     _childItems = [];
     _childPhysics.clear();
 
+    // Use the current layout mode's column count for children
+    // In list mode, children appear as a list; in grid mode, children appear as a grid
+    _childColumns = _isList ? 1 : _columns;
+
     // Generate child items
     final rng = Random(item.id.hashCode);
     final count = 4 + rng.nextInt(5);
@@ -816,9 +840,10 @@ class _BubbleCanvasState extends State<BubbleCanvas>
     final childStartY = bp.canvasY + _itemHeight + widget.delegate.listSpacing;
     for (var i = 0; i < _childItems.length; i++) {
       final child = _childItems[i];
+      final childPos = _childPositionForIndex(i, bp.canvasX, childStartY);
       _childPhysics[child.id] = _BubblePhysics(
-        canvasX: bp.canvasX,
-        canvasY: childStartY + i * (_itemHeight + widget.delegate.listSpacing),
+        canvasX: childPos.dx,
+        canvasY: childPos.dy,
         accentColor: child.accentColor ?? bp.accentColor,
         staggerDelay: i * 0.06,
       );
@@ -826,6 +851,21 @@ class _BubbleCanvasState extends State<BubbleCanvas>
 
     _Sound.playSpawn();
     setState(() {});
+  }
+
+  /// Compute position for a child item at the given index
+  Offset _childPositionForIndex(int index, double parentX, double startY) {
+    if (_childColumns <= 1) {
+      // List layout: stack vertically below parent
+      return Offset(parentX, startY + index * (_itemHeight + widget.delegate.listSpacing));
+    }
+    // Grid layout: arrange in columns
+    final col = index % _childColumns;
+    final row = index ~/ _childColumns;
+    final bw = widget.delegate.bubbleWidth;
+    final x = _gutterX + col * (bw + _gutterX);
+    final y = startY + row * widget.delegate.rowSpacing;
+    return Offset(x, y);
   }
 
   void _collapseExpanded() {
@@ -900,6 +940,7 @@ class _BubbleCanvasState extends State<BubbleCanvas>
       } else {
         _expandT = max(0.0, _expandT - dt * 4.0); // ~250ms collapse
         if (_expandT <= 0) {
+          _snapToHome();
           _expandedItemId = null;
           _childItems = [];
           _childPhysics.clear();
@@ -915,10 +956,16 @@ class _BubbleCanvasState extends State<BubbleCanvas>
     // Check viewport entry for bubbles
     _checkViewportEntry();
 
-    // Animate spawn opacity/scale
+    // Animate spawn opacity/scale + pop offset
     for (final bp in _bubblePhysics.values) {
       if (bp.hasEnteredViewport && bp.opacity < 1.0) {
         bp.opacity = min(1.0, bp.opacity + dt * 4); // ~250ms fade
+        needsRebuild = true;
+      }
+      // Spring pop offset toward 0
+      if (bp.popOffsetY.abs() > 0.5) {
+        bp.popOffsetY *= 0.88; // damped spring ~120ms settle
+        if (bp.popOffsetY.abs() < 0.5) bp.popOffsetY = 0;
         needsRebuild = true;
       }
     }
@@ -956,6 +1003,10 @@ class _BubbleCanvasState extends State<BubbleCanvas>
         bp.hasEnteredViewport = true;
         bp.spawnTime = _tickerSeconds;
         bp.opacity = 0.0;
+        // Pop entry: start item above viewport, it will spring down
+        if (widget.popEntry) {
+          bp.popOffsetY = -(screenY + bh + 40); // start above viewport top
+        }
         _Sound.playSpawn();
       }
     }
@@ -977,17 +1028,27 @@ class _BubbleCanvasState extends State<BubbleCanvas>
       if (_draggingItemId == item.id || _activeMomentum.containsKey(item.id)) continue;
 
       final homePos = _positionForIndex(i);
-      // Displace items whose home Y is below the parent
       if (homePos.dy > _expandedParentHomeY) {
         final targetY = homePos.dy + displacement;
-        // Spring toward target (critically damped feel)
-        bp.canvasY += (targetY - bp.canvasY) * 0.12;
+        // Use faster spring (0.2) so collapse doesn't leave gaps
+        bp.canvasY += (targetY - bp.canvasY) * 0.2;
       } else {
-        // Spring back to home for items above
-        bp.canvasY += (homePos.dy - bp.canvasY) * 0.12;
+        bp.canvasY += (homePos.dy - bp.canvasY) * 0.2;
       }
-      // Always spring X back to home
-      bp.canvasX += (homePos.dx - bp.canvasX) * 0.12;
+      bp.canvasX += (homePos.dx - bp.canvasX) * 0.2;
+    }
+  }
+
+  /// Snap all siblings back to home positions (called when expand state clears)
+  void _snapToHome() {
+    final items = widget.delegate.items;
+    for (var i = 0; i < items.length; i++) {
+      final bp = _bubblePhysics[items[i].id];
+      if (bp == null) continue;
+      if (_draggingItemId == items[i].id || _activeMomentum.containsKey(items[i].id)) continue;
+      final homePos = _positionForIndex(i);
+      bp.canvasX = homePos.dx;
+      bp.canvasY = homePos.dy;
     }
   }
 
@@ -1010,12 +1071,19 @@ class _BubbleCanvasState extends State<BubbleCanvas>
           bp.hasEnteredViewport = true;
           bp.spawnTime = _tickerSeconds;
           bp.opacity = 0.0;
+          if (widget.popEntry) {
+            bp.popOffsetY = -(screenY + bh + 40);
+          }
         }
       }
-      // Fade in children that have entered viewport
+      // Fade in + spring pop offset for children
       for (final bp in _childPhysics.values) {
         if (bp.hasEnteredViewport && bp.opacity < 1.0) {
           bp.opacity = min(1.0, bp.opacity + dt * 4); // ~250ms fade
+        }
+        if (bp.popOffsetY.abs() > 0.5) {
+          bp.popOffsetY *= 0.88;
+          if (bp.popOffsetY.abs() < 0.5) bp.popOffsetY = 0;
         }
       }
     } else {
@@ -1296,9 +1364,20 @@ class _BubbleCanvasState extends State<BubbleCanvas>
       final spawnT = bp.spawnTime > 0
           ? min(1.0, (_tickerSeconds - bp.spawnTime) / 0.3)
           : 1.0;
-      // List mode: slide in from left; Grid mode: scale in
-      final entryScale = _isList ? 1.0 : (0.8 + 0.2 * Curves.easeOutBack.transform(spawnT));
-      final slideX = _isList ? (1.0 - Curves.easeOutCubic.transform(spawnT)) * -60 : 0.0;
+      // Entry animation varies by mode and popEntry setting
+      double entryScale;
+      double slideX;
+      if (widget.popEntry) {
+        // Pop entry: scale from 0.6 with overshoot, no horizontal slide
+        entryScale = 0.6 + 0.4 * Curves.easeOutBack.transform(spawnT);
+        slideX = 0;
+      } else if (_isList) {
+        entryScale = 1.0;
+        slideX = (1.0 - Curves.easeOutCubic.transform(spawnT)) * -60;
+      } else {
+        entryScale = 0.8 + 0.2 * Curves.easeOutBack.transform(spawnT);
+        slideX = 0;
+      }
       final totalScale = entryScale * bp.bounceScale * (isDragging ? 1.02 : 1.0);
 
       Widget child;
@@ -1322,7 +1401,7 @@ class _BubbleCanvasState extends State<BubbleCanvas>
       result.add(
         Positioned(
           left: bp.canvasX + slideX,
-          top: screenY,
+          top: screenY + bp.popOffsetY,
           width: bw,
           height: bh,
           child: Opacity(
@@ -1337,30 +1416,61 @@ class _BubbleCanvasState extends State<BubbleCanvas>
 
       // Inject children right after the expanded parent
       if (isExpandedParent && _childPhysics.isNotEmpty) {
+        final childIsGrid = _childColumns > 1;
+        final childW = childIsGrid ? widget.delegate.bubbleWidth : bw;
+        final childH = childIsGrid ? widget.delegate.bubbleHeight : bh;
+
         for (final childItem in _childItems) {
           final cbp = _childPhysics[childItem.id];
           if (cbp == null || cbp.opacity <= 0) continue;
           final childScreenY = cbp.canvasY - _scrollOffset;
-          if (childScreenY + bh < -50 || childScreenY > widget.height + 50) continue;
+          if (childScreenY + childH < -50 || childScreenY > widget.height + 50) continue;
           if (!cbp.hasEnteredViewport) continue;
 
           final childSpawnT = cbp.spawnTime > 0
               ? min(1.0, (_tickerSeconds - cbp.spawnTime) / 0.3)
               : 1.0;
-          final childSlideX = (1.0 - Curves.easeOutCubic.transform(childSpawnT)) * -60;
+
+          Widget childWidget;
+          double childSlideX;
+          double childScale;
+          if (widget.popEntry) {
+            // Pop entry: scale from 0.6 with overshoot
+            childScale = 0.6 + 0.4 * Curves.easeOutBack.transform(childSpawnT);
+            childSlideX = 0;
+          } else if (childIsGrid) {
+            childScale = 0.8 + 0.2 * Curves.easeOutBack.transform(childSpawnT);
+            childSlideX = 0;
+          } else {
+            childScale = 1.0;
+            childSlideX = (1.0 - Curves.easeOutCubic.transform(childSpawnT)) * -60;
+          }
+
+          if (childIsGrid) {
+            childWidget = _DefaultBubbleWidget(
+              item: childItem,
+              isDragging: false,
+              accentColor: cbp.accentColor,
+            );
+          } else {
+            childWidget = _DefaultListBubbleWidget(
+              item: childItem,
+              isDragging: false,
+              accentColor: cbp.accentColor,
+            );
+          }
 
           result.add(
             Positioned(
               left: cbp.canvasX + childSlideX,
-              top: childScreenY,
-              width: bw,
-              height: bh,
+              top: childScreenY + cbp.popOffsetY,
+              width: childW,
+              height: childH,
               child: Opacity(
                 opacity: cbp.opacity.clamp(0.0, 1.0),
-                child: _DefaultListBubbleWidget(
-                  item: childItem,
-                  isDragging: false,
-                  accentColor: cbp.accentColor,
+                child: Transform.scale(
+                  scale: childScale,
+                  child: childWidget,
                 ),
               ),
             ),
@@ -1962,6 +2072,7 @@ class _NavLevel {
 class _BubbleCanvasDemoState extends State<BubbleCanvasDemo> {
   int _page = 0;
   BubbleLayoutMode _layoutMode = BubbleLayoutMode.grid;
+  bool _popEntry = false;
   final List<_NavLevel> _navStack = [];
 
   static const _sampleImages = [
@@ -2186,13 +2297,24 @@ class _BubbleCanvasDemoState extends State<BubbleCanvasDemo> {
                 ),
               ),
             ),
-            const SizedBox(width: 12),
+            const SizedBox(width: 4),
+            IconButton(
+              icon: Icon(
+                _popEntry ? Icons.animation : Icons.animation_outlined,
+                color: _popEntry ? accentColor : _S.textSecondary,
+                size: 22,
+              ),
+              tooltip: 'Pop entry',
+              onPressed: () => setState(() => _popEntry = !_popEntry),
+            ),
+            const SizedBox(width: 8),
           ],
         ),
         body: LayoutBuilder(
           builder: (context, constraints) {
             return BubbleCanvas(
               height: constraints.maxHeight,
+              popEntry: _popEntry,
               delegate: BubbleCanvasDelegate(
                 items: _current.items,
                 layoutMode: _layoutMode,
