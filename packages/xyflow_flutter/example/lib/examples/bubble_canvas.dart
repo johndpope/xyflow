@@ -1003,9 +1003,9 @@ class _BubbleCanvasState extends State<BubbleCanvas>
         bp.hasEnteredViewport = true;
         bp.spawnTime = _tickerSeconds;
         bp.opacity = 0.0;
-        // Pop entry: start item above viewport, it will spring down
+        // Pop entry: start item below viewport bottom, it will spring up
         if (widget.popEntry) {
-          bp.popOffsetY = -(screenY + bh + 40); // start above viewport top
+          bp.popOffsetY = widget.height - screenY + 40; // start below viewport
         }
         _Sound.playSpawn();
       }
@@ -1072,7 +1072,7 @@ class _BubbleCanvasState extends State<BubbleCanvas>
           bp.spawnTime = _tickerSeconds;
           bp.opacity = 0.0;
           if (widget.popEntry) {
-            bp.popOffsetY = -(screenY + bh + 40);
+            bp.popOffsetY = widget.height - screenY + 40;
           }
         }
       }
