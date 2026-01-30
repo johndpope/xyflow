@@ -7,6 +7,7 @@ import 'examples/story_flow.dart';
 import 'examples/node_connector.dart';
 import 'examples/advanced_features.dart';
 import 'examples/robot_grid.dart';
+import 'examples/bubble_canvas.dart';
 
 void main() {
   runApp(const MyApp());
@@ -121,6 +122,16 @@ class ExampleSelector extends StatelessWidget {
             onTap: () => Navigator.push(
               context,
               MaterialPageRoute(builder: (_) => const RobotGridExample()),
+            ),
+          ),
+          _ExampleCard(
+            title: 'Bubble Canvas',
+            description: 'Scrollable panel with physics-based image bubbles, drag, bounce, and grid warp.',
+            icon: Icons.bubble_chart,
+            color: const Color(0xFFD2A8FF),
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const BubbleCanvasDemo()),
             ),
           ),
         ],
