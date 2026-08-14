@@ -224,6 +224,7 @@ class NodeDefinition {
         name: outputNames[i],
         type: SlotType.fromTypeName(outputNames[i]),
         tooltip: i < outputTooltips.length ? outputTooltips[i] : null,
+        isList: i < outputIsList.length && outputIsList[i],
       ));
     }
 

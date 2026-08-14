@@ -1,5 +1,5 @@
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart' show Color, Colors, TextStyle, immutable;
+import 'package:flutter/material.dart' show Color, immutable;
 
 import 'marker.dart';
 import 'position.dart';

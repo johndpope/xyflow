@@ -503,9 +503,10 @@ class _XYFlowState<NodeData, EdgeData> extends State<XYFlow<NodeData, EdgeData>>
                       onPointerSignal: _handlePointerSignal,
                       child: Container(
                         color: Colors.transparent, // Ensure hit testing works
-                        child: Stack(
-                          key: _viewportKey,
-                          children: [
+                        child: XYFlowSurface(
+                          child: Stack(
+                            key: _viewportKey,
+                            children: [
                             // Background children first (behind everything)
                             if (widget.children != null)
                               ...widget.children!.where((c) => c is Background),
@@ -545,6 +546,7 @@ class _XYFlowState<NodeData, EdgeData> extends State<XYFlow<NodeData, EdgeData>>
                             if (widget.children != null)
                               ...widget.children!.where((c) => c is! Background),
                           ],
+                        ),
                         ),
                       ),
                     ),

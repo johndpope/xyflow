@@ -146,6 +146,9 @@ class SlotDefinition {
   /// Additional configuration from API
   final Map<String, dynamic>? config;
 
+  /// Whether this slot carries a list of values.
+  final bool isList;
+
   const SlotDefinition({
     required this.name,
     required this.type,
@@ -158,6 +161,7 @@ class SlotDefinition {
     this.multiline = false,
     this.tooltip,
     this.config,
+    this.isList = false,
   });
 
   /// Create from ComfyUI API response
@@ -225,6 +229,7 @@ class SlotDefinition {
     bool? multiline,
     String? tooltip,
     Map<String, dynamic>? config,
+    bool? isList,
   }) {
     return SlotDefinition(
       name: name ?? this.name,
@@ -238,6 +243,7 @@ class SlotDefinition {
       multiline: multiline ?? this.multiline,
       tooltip: tooltip ?? this.tooltip,
       config: config ?? this.config,
+      isList: isList ?? this.isList,
     );
   }
 }

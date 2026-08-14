@@ -412,7 +412,7 @@ class _NodeSearchPanelState extends State<NodeSearchPanel> {
 
   Widget _buildNodeItem(NodeDefinition def, int index) {
     final isSelected = index == _selectedIndex;
-    final color = def.color ?? NodeCategory.getColor(def.category);
+    final color = def.color;
 
     return InkWell(
       onTap: () => _selectNode(def),

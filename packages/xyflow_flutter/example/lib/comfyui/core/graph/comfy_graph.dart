@@ -266,12 +266,6 @@ class ComfyGraph {
   /// Node registry for type lookups.
   final NodeRegistry? registry;
 
-  /// Counter for generating node IDs.
-  int _lastNodeId = 0;
-
-  /// Counter for generating edge IDs.
-  int _lastEdgeId = 0;
-
   /// Extra metadata.
   final Map<String, dynamic> extra = {};
 
@@ -486,8 +480,6 @@ class ComfyGraph {
     _edges.clear();
     _groups.clear();
     extra.clear();
-    _lastNodeId = 0;
-    _lastEdgeId = 0;
   }
 
   /// Duplicate selected nodes.

@@ -45,29 +45,26 @@ class XYFlowProvider<NodeData, EdgeData>
   /// This is useful for widgets like Controls and Background that need to
   /// access the state but don't know the specific NodeData/EdgeData types.
   static XYFlowState<dynamic, dynamic>? maybeOfAny(BuildContext context) {
-    // Check if context is still valid (not deactivated)
     if (context is Element && !context.mounted) {
       return null;
     }
 
     try {
-      final element = context.getElementForInheritedWidgetOfExactType<XYFlowProvider<dynamic, dynamic>>();
+      final element = context.getElementForInheritedWidgetOfExactType<XYFlowProvider>();
       if (element != null) {
-        return (element.widget as XYFlowProvider<dynamic, dynamic>).notifier;
+        return (element.widget as XYFlowProvider).notifier;
       }
-      // Try to find any XYFlowProvider in the tree
+      // Typed lookup misses XYFlowProvider<Foo, Bar>; walk for any provider.
       XYFlowState<dynamic, dynamic>? result;
       context.visitAncestorElements((element) {
         if (element.widget is XYFlowProvider) {
-          final provider = element.widget as XYFlowProvider;
-          result = provider.notifier as XYFlowState<dynamic, dynamic>?;
-          return false; // Stop visiting
+          result = (element.widget as XYFlowProvider).notifier;
+          return false;
         }
-        return true; // Continue visiting
+        return true;
       });
       return result;
-    } catch (e) {
-      // Context may be deactivated, return null safely
+    } catch (_) {
       return null;
     }
   }
@@ -157,6 +154,31 @@ class _XYFlowSelectorState<NodeData, EdgeData, T>
 
     return widget.builder(context, value, widget.child);
   }
+}
+
+/// Marks the flow viewport so descendants can resolve its [RenderBox]
+/// without matching widget types by name.
+class XYFlowSurface extends InheritedWidget {
+  /// Creates a flow surface marker.
+  const XYFlowSurface({
+    super.key,
+    required super.child,
+  });
+
+  /// The viewport render box, or null if the context is unmounted.
+  static RenderBox? renderBoxOf(BuildContext context) {
+    if (context is Element && !context.mounted) return null;
+    try {
+      final element =
+          context.getElementForInheritedWidgetOfExactType<XYFlowSurface>();
+      return element?.findRenderObject() as RenderBox?;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
+  bool updateShouldNotify(covariant XYFlowSurface oldWidget) => false;
 }
 
 /// Provides the current node ID to descendants.

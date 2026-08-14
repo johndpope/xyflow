@@ -1,7 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import '../../../../lib/comfyui/core/nodes/node_registry.dart';
 import '../../../../lib/comfyui/core/nodes/node_definition.dart';
-import '../../../../lib/comfyui/core/nodes/slot_types.dart';
 
 void main() {
   group('NodeRegistry', () {

@@ -79,7 +79,7 @@ void main() {
       const pos2 = XYPosition(x: 3, y: 4);
 
       // Distance should be 5 (3-4-5 triangle)
-      expect(pos1.distanceTo(pos2), closeTo(25, 0.001)); // Returns squared distance
+      expect(pos1.distanceTo(pos2), closeTo(5, 0.001));
     });
 
     test('toJson serializes correctly', () {

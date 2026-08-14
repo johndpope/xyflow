@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../../core/types/edge.dart';
 import '../../core/types/position.dart';
-import '../../core/utils/edges/bezier.dart';
 import '../../core/utils/edges/edge_path.dart';
 import '../../core/utils/edges/smooth_step.dart';
 

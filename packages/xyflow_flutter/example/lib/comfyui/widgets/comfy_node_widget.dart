@@ -12,7 +12,6 @@ import 'package:flutter/material.dart';
 import 'package:xyflow_flutter/xyflow_flutter.dart';
 
 import '../core/nodes/node_definition.dart';
-import '../core/nodes/node_registry.dart';
 import '../core/nodes/slot_types.dart';
 import '../core/graph/comfy_graph.dart';
 

@@ -7,8 +7,6 @@
 /// - Selection highlighting
 library;
 
-import 'dart:ui' as ui;
-
 import 'package:flutter/material.dart';
 import 'package:xyflow_flutter/xyflow_flutter.dart';
 

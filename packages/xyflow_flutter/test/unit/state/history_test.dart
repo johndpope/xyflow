@@ -1,5 +1,4 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:xyflow_flutter/src/core/types/edge.dart';
 import 'package:xyflow_flutter/src/core/types/node.dart';
 import 'package:xyflow_flutter/src/core/types/position.dart';
 import 'package:xyflow_flutter/src/core/types/viewport.dart';

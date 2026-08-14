@@ -9,7 +9,6 @@ import 'dart:ui';
 
 import '../graph/comfy_graph.dart';
 import '../nodes/node_registry.dart';
-import '../nodes/slot_types.dart';
 
 /// Serializes a ComfyGraph to ComfyUI JSON format.
 class WorkflowSerializer {

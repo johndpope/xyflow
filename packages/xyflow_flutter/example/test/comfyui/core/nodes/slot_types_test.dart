@@ -175,6 +175,7 @@ void main() {
       expect(modified.type, SlotType.model);
       expect(modified.isOptional, true);
       expect(original.isOptional, false); // Original unchanged
+      expect(modified.isList, false);
     });
   });
 }

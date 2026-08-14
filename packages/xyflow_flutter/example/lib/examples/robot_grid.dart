@@ -1,145 +1,10 @@
 import 'dart:math';
-import 'dart:js_interop';
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:xyflow_flutter/xyflow_flutter.dart' hide Transform;
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// JS interop for Web Audio sound effects
-// ═══════════════════════════════════════════════════════════════════════════════
-
-@JS('eval')
-external JSAny? _jsEval(JSString code);
-
-abstract final class _Sound {
-  static bool _enabled = true;
-
-  static void playConnect() {
-    if (!kIsWeb || !_enabled) return;
-    try {
-      _jsEval(
-        "(function(){var c=new AudioContext(),o=c.createOscillator(),g=c.createGain();"
-        "o.type='sine';o.frequency.setValueAtTime(600,c.currentTime);"
-        "o.frequency.exponentialRampToValueAtTime(1200,c.currentTime+0.1);"
-        "g.gain.setValueAtTime(0.08,c.currentTime);"
-        "g.gain.exponentialRampToValueAtTime(0.001,c.currentTime+0.15);"
-        "o.connect(g);g.connect(c.destination);o.start();o.stop(c.currentTime+0.15)})()"
-            .toJS,
-      );
-    } catch (_) {}
-  }
-
-  static void playBounce(double intensity) {
-    if (!kIsWeb || !_enabled) return;
-    try {
-      // Louder and deeper for harder impacts
-      final vol = (0.03 + intensity * 0.25).clamp(0.03, 0.28);
-      final freq = (100 + intensity * 80).round(); // higher pitch for harder hits
-      final dur = (0.12 + intensity * 0.15).toStringAsFixed(2);
-      _jsEval(
-        "(function(){var c=new AudioContext(),o=c.createOscillator(),n=c.createOscillator(),g=c.createGain();"
-        "o.type='sine';n.type='triangle';"
-        "o.frequency.setValueAtTime($freq,c.currentTime);"
-        "o.frequency.exponentialRampToValueAtTime(40,c.currentTime+$dur);"
-        "n.frequency.setValueAtTime(${freq * 2},c.currentTime);"
-        "n.frequency.exponentialRampToValueAtTime(30,c.currentTime+${(double.parse(dur) * 0.8).toStringAsFixed(2)});"
-        "g.gain.setValueAtTime($vol,c.currentTime);"
-        "g.gain.exponentialRampToValueAtTime(0.001,c.currentTime+$dur);"
-        "o.connect(g);n.connect(g);g.connect(c.destination);"
-        "o.start();n.start();o.stop(c.currentTime+$dur);n.stop(c.currentTime+$dur)})()"
-            .toJS,
-      );
-    } catch (_) {}
-  }
-
-  static void playCut() {
-    if (!kIsWeb || !_enabled) return;
-    try {
-      _jsEval(
-        "(function(){var c=new AudioContext(),o=c.createOscillator(),g=c.createGain();"
-        "o.type='sawtooth';o.frequency.setValueAtTime(800,c.currentTime);"
-        "o.frequency.exponentialRampToValueAtTime(200,c.currentTime+0.1);"
-        "g.gain.setValueAtTime(0.06,c.currentTime);"
-        "g.gain.exponentialRampToValueAtTime(0.001,c.currentTime+0.12);"
-        "o.connect(g);g.connect(c.destination);o.start();o.stop(c.currentTime+0.12)})()"
-            .toJS,
-      );
-    } catch (_) {}
-  }
-
-  /// Soft pop when spawning a node
-  static void playSpawn() {
-    if (!kIsWeb || !_enabled) return;
-    try {
-      _jsEval(
-        "(function(){var c=new AudioContext(),o=c.createOscillator(),g=c.createGain();"
-        "o.type='sine';o.frequency.setValueAtTime(300,c.currentTime);"
-        "o.frequency.exponentialRampToValueAtTime(500,c.currentTime+0.06);"
-        "o.frequency.exponentialRampToValueAtTime(250,c.currentTime+0.12);"
-        "g.gain.setValueAtTime(0.06,c.currentTime);"
-        "g.gain.exponentialRampToValueAtTime(0.001,c.currentTime+0.15);"
-        "o.connect(g);g.connect(c.destination);o.start();o.stop(c.currentTime+0.15)})()"
-            .toJS,
-      );
-    } catch (_) {}
-  }
-
-  /// Subtle pickup sound when starting a drag
-  static void playPickup() {
-    if (!kIsWeb || !_enabled) return;
-    try {
-      _jsEval(
-        "(function(){var c=new AudioContext(),o=c.createOscillator(),g=c.createGain();"
-        "o.type='sine';o.frequency.setValueAtTime(400,c.currentTime);"
-        "o.frequency.exponentialRampToValueAtTime(600,c.currentTime+0.05);"
-        "g.gain.setValueAtTime(0.04,c.currentTime);"
-        "g.gain.exponentialRampToValueAtTime(0.001,c.currentTime+0.08);"
-        "o.connect(g);g.connect(c.destination);o.start();o.stop(c.currentTime+0.08)})()"
-            .toJS,
-      );
-    } catch (_) {}
-  }
-
-  /// Soft thud when dropping a node (no momentum)
-  static void playDrop() {
-    if (!kIsWeb || !_enabled) return;
-    try {
-      _jsEval(
-        "(function(){var c=new AudioContext(),o=c.createOscillator(),g=c.createGain();"
-        "o.type='sine';o.frequency.setValueAtTime(200,c.currentTime);"
-        "o.frequency.exponentialRampToValueAtTime(100,c.currentTime+0.08);"
-        "g.gain.setValueAtTime(0.05,c.currentTime);"
-        "g.gain.exponentialRampToValueAtTime(0.001,c.currentTime+0.1);"
-        "o.connect(g);g.connect(c.destination);o.start();o.stop(c.currentTime+0.1)})()"
-            .toJS,
-      );
-    } catch (_) {}
-  }
-
-  /// Whoosh when releasing with momentum
-  static void playThrow(double intensity) {
-    if (!kIsWeb || !_enabled) return;
-    try {
-      final vol = (intensity * 0.08).clamp(0.02, 0.1);
-      final freq = (300 + intensity * 400).clamp(300, 700).round();
-      _jsEval(
-        "(function(){var c=new AudioContext(),o=c.createOscillator(),n=c.createOscillator(),g=c.createGain();"
-        "o.type='sine';n.type='sawtooth';"
-        "o.frequency.setValueAtTime($freq,c.currentTime);"
-        "o.frequency.exponentialRampToValueAtTime(100,c.currentTime+0.2);"
-        "n.frequency.setValueAtTime(${freq ~/ 2},c.currentTime);"
-        "n.frequency.exponentialRampToValueAtTime(50,c.currentTime+0.15);"
-        "g.gain.setValueAtTime($vol,c.currentTime);"
-        "g.gain.exponentialRampToValueAtTime(0.001,c.currentTime+0.2);"
-        "o.connect(g);n.connect(g);g.connect(c.destination);"
-        "o.start();n.start();o.stop(c.currentTime+0.2);n.stop(c.currentTime+0.15)})()"
-            .toJS,
-      );
-    } catch (_) {}
-  }
-}
+import 'robot_grid_sound.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Style constants
@@ -381,7 +246,7 @@ class _RobotGridExampleState extends State<RobotGridExample>
   @override
   void initState() {
     super.initState();
-    _Sound._enabled = _cfg.soundEnabled;
+    RobotGridSound.enabled = _cfg.soundEnabled;
     _physicsTicker = createTicker(_onPhysicsTick)..start();
   }
 
@@ -555,7 +420,7 @@ class _RobotGridExampleState extends State<RobotGridExample>
   void _onConnect(Connection connection) {
     if (connection.source == connection.target) return;
     if (_edges.any((e) => e.source == connection.source && e.target == connection.target)) return;
-    _Sound.playConnect();
+    RobotGridSound.playConnect();
     setState(() {
       _edges = [
         ..._edges,
@@ -604,7 +469,7 @@ class _RobotGridExampleState extends State<RobotGridExample>
     final index = _nextIndex++;
     final id = 'robot-$index';
     _spawnTimes[id] = _tickerSeconds;
-    _Sound.playSpawn();
+    RobotGridSound.playSpawn();
 
     setState(() {
       _nodes = [
@@ -627,7 +492,7 @@ class _RobotGridExampleState extends State<RobotGridExample>
   void _onNodeDragStart(Node<RobotNodeData> node) {
     _activeMomentum.remove(node.id);
     _velocitySamples[node.id] = [];
-    _Sound.playPickup();
+    RobotGridSound.playPickup();
     setState(() => _draggingNodeId = node.id);
   }
 
@@ -668,11 +533,11 @@ class _RobotGridExampleState extends State<RobotGridExample>
       vy *= scale;
     }
     if (speed < _cfg.thresholdPxS) {
-      _Sound.playDrop();
+      RobotGridSound.playDrop();
       return;
     }
 
-    _Sound.playThrow((speed / _cfg.maxVelPxS).clamp(0.0, 1.0));
+    RobotGridSound.playThrow((speed / _cfg.maxVelPxS).clamp(0.0, 1.0));
     _activeMomentum[node.id] = _MomentumState(
       velocity: Offset(vx, vy), position: Offset(node.position.x, node.position.y),
     );
@@ -802,7 +667,7 @@ class _RobotGridExampleState extends State<RobotGridExample>
     final speed = _activeMomentum[nodeId]?.velocity.distance ?? 0;
 
     _activePulses.add(_PulseEvent(center: screenPos, startTime: _tickerSeconds, color: color));
-    _Sound.playBounce((speed / _cfg.maxVelPxS).clamp(0.0, 1.0));
+    RobotGridSound.playBounce((speed / _cfg.maxVelPxS).clamp(0.0, 1.0));
 
     if (_cfg.particlesEnabled) {
       final rng = Random();
@@ -861,7 +726,7 @@ class _RobotGridExampleState extends State<RobotGridExample>
           cutPoint: Offset((p1.dx + p2.dx) / 2, (p1.dy + p2.dy) / 2),
           startTime: _tickerSeconds, color: _S.edgeColor,
         ));
-        _Sound.playCut();
+        RobotGridSound.playCut();
       }
     }
     if (edgesToRemove.isNotEmpty) {
@@ -1065,7 +930,7 @@ class _RobotGridExampleState extends State<RobotGridExample>
 
           if (_showDebugPanel)
             _DebugPanel(cfg: _cfg, onChanged: () => setState(() {
-              _Sound._enabled = _cfg.soundEnabled;
+              RobotGridSound.enabled = _cfg.soundEnabled;
             })),
         ]),
       ),

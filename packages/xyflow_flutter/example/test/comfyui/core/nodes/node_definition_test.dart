@@ -161,6 +161,7 @@ void main() {
         // Check outputs
         expect(def.outputs.length, 1);
         expect(def.outputs[0].type, SlotType.latent);
+        expect(def.outputs[0].isList, false);
       });
 
       test('parses CheckpointLoaderSimple-like node', () {
@@ -195,6 +196,22 @@ void main() {
         expect(def.outputs[0].type, SlotType.model);
         expect(def.outputs[1].type, SlotType.clip);
         expect(def.outputs[2].type, SlotType.vae);
+      });
+
+      test('parses output_is_list flags onto output slots', () {
+        final apiData = {
+          'input': {'required': {}},
+          'output': ['IMAGE', 'MASK'],
+          'output_is_list': [true, false],
+          'name': 'BatchImages',
+          'display_name': 'Batch Images',
+          'category': 'image',
+        };
+
+        final def = NodeDefinition.fromApi('BatchImages', apiData);
+
+        expect(def.outputs[0].isList, true);
+        expect(def.outputs[1].isList, false);
       });
 
       test('parses CLIPTextEncode-like node', () {

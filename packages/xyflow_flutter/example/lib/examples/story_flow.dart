@@ -1627,6 +1627,7 @@ class _VideoNodeState extends State<_VideoNode> {
     // Wrap with WebDropZone for web drag-drop support
     if (kIsWeb) {
       return WebDropZone(
+        onDrop: _handleFileDrop,
         onDropWithUrl: _handleFileDropWithUrl,
         onDragEnter: () => setState(() => _isDragging = true),
         onDragLeave: () => setState(() => _isDragging = false),

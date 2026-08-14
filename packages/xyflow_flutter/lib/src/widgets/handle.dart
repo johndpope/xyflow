@@ -4,6 +4,7 @@ import '../core/types/connection.dart';
 import '../core/types/handle.dart';
 import '../core/types/position.dart';
 import '../state/xyflow_provider.dart';
+import '../state/xyflow_state.dart';
 
 /// A connection handle widget.
 ///
@@ -57,10 +58,9 @@ class HandleWidget extends StatefulWidget {
 class _HandleWidgetState extends State<HandleWidget> {
   bool _isHovered = false;
   bool _isConnecting = false;
-  Offset _startGlobalPosition = Offset.zero;
   String? _registeredNodeId;
-  // Cache state reference for safe disposal (avoids deactivated ancestor lookup)
-  dynamic _cachedState;
+  // Cache state for dispose — ancestor lookup is unsafe once deactivated.
+  XYFlowState<dynamic, dynamic>? _cachedState;
 
   @override
   void didChangeDependencies() {
@@ -81,7 +81,6 @@ class _HandleWidgetState extends State<HandleWidget> {
 
     if (state == null || nodeId == null) return;
     _registeredNodeId = nodeId;
-    _cachedState = state; // Cache for safe disposal
 
     // Schedule registration after build to get correct position
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -99,9 +98,10 @@ class _HandleWidgetState extends State<HandleWidget> {
   }
 
   void _unregisterHandle() {
-    if (_registeredNodeId == null || _cachedState == null) return;
-    // Use cached state — safe during dispose (no ancestor lookup needed)
-    _cachedState.unregisterHandle(_registeredNodeId!, widget.id, widget.type);
+    final state = _cachedState;
+    final nodeId = _registeredNodeId;
+    if (state == null || nodeId == null) return;
+    state.unregisterHandle(nodeId, widget.id, widget.type);
   }
 
   XYPosition? _getHandleFlowPosition() {
@@ -191,7 +191,6 @@ class _HandleWidgetState extends State<HandleWidget> {
     if (state == null || nodeId == null) return;
 
     setState(() => _isConnecting = true);
-    _startGlobalPosition = details.globalPosition;
 
     // Get handle position in flow coordinates
     final RenderBox? box = context.findRenderObject() as RenderBox?;
@@ -259,38 +258,16 @@ class _HandleWidgetState extends State<HandleWidget> {
     if (state == null) return XYPosition(x: 0, y: 0);
 
     final viewport = state.viewport;
+    final flowBox = XYFlowSurface.renderBoxOf(context);
 
-    // Find the XYFlow render box to get local position
-    // Walk up to find the flow container
-    RenderBox? flowBox;
-    try {
-      // Check if context is still valid
-      if (context is Element && !context.mounted) {
-        return XYPosition(
-          x: (screenPosition.dx - viewport.x) / viewport.zoom,
-          y: (screenPosition.dy - viewport.y) / viewport.zoom,
-        );
-      }
-      context.visitAncestorElements((element) {
-        if (element.widget.runtimeType.toString().contains('XYFlow')) {
-          flowBox = element.findRenderObject() as RenderBox?;
-          return false;
-        }
-        return true;
-      });
-    } catch (e) {
-      // Context may be deactivated, use fallback
-    }
-
-    if (flowBox == null) {
-      // Fallback: use viewport transform directly
+    if (flowBox == null || !flowBox.hasSize) {
       return XYPosition(
         x: (screenPosition.dx - viewport.x) / viewport.zoom,
         y: (screenPosition.dy - viewport.y) / viewport.zoom,
       );
     }
 
-    final localPosition = flowBox!.globalToLocal(screenPosition);
+    final localPosition = flowBox.globalToLocal(screenPosition);
     return XYPosition(
       x: (localPosition.dx - viewport.x) / viewport.zoom,
       y: (localPosition.dy - viewport.y) / viewport.zoom,
