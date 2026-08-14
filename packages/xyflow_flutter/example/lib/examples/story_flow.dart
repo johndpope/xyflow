@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
@@ -147,6 +148,16 @@ class _StoryFlowExampleState extends State<StoryFlowExample>
               _addNode(StoryNodeType.endBad, flowPosition);
             },
           ),
+          _ContextMenuDivider(),
+          _ContextMenuItem(
+            icon: Icons.visibility,
+            label: 'Copy graph for agent',
+            color: Colors.white70,
+            onTap: () {
+              _hideContextMenu();
+              _copyGraphObservation();
+            },
+          ),
         ],
       ),
     );
@@ -266,6 +277,25 @@ class _StoryFlowExampleState extends State<StoryFlowExample>
     setState(() {
       _nodes = [..._nodes, newNode];
     });
+  }
+
+  /// Compact graph snapshot for an LLM (see [observeGraph]).
+  void _copyGraphObservation() {
+    final snap = observeGraph(
+      nodes: _nodes,
+      edges: _edges,
+      focusNodeId: _activeNodeId,
+      nodeData: (n) => {
+        'title': n.data.title,
+        'description': n.data.description,
+        'kind': n.data.nodeType.name,
+        if (n.data.choices != null) 'choices': n.data.choices,
+      },
+    );
+    Clipboard.setData(ClipboardData(text: jsonEncode(snap)));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Copied graph observation for an agent')),
+    );
   }
 
   String _getNodeTypeString(StoryNodeType type) {

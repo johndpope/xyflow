@@ -16,6 +16,7 @@ export 'src/core/types/changes.dart';
 export 'src/core/types/marker.dart';
 
 // Core utilities
+export 'src/core/utils/graph_observation.dart';
 export 'src/core/utils/edges/bezier.dart';
 export 'src/core/utils/edges/smooth_step.dart';
 export 'src/core/utils/edges/step.dart';
