@@ -194,7 +194,11 @@ class _ConnPath {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 class RobotGridExample extends StatefulWidget {
-  const RobotGridExample({super.key});
+  const RobotGridExample({super.key, this.seedDemo = false});
+
+  /// Seeds a few connected panels so the canvas is not empty.
+  final bool seedDemo;
+
   @override
   State<RobotGridExample> createState() => _RobotGridExampleState();
 }
@@ -248,6 +252,62 @@ class _RobotGridExampleState extends State<RobotGridExample>
     super.initState();
     RobotGridSound.enabled = _cfg.soundEnabled;
     _physicsTicker = createTicker(_onPhysicsTick)..start();
+    if (widget.seedDemo) {
+      _seedDemoNodes();
+    }
+  }
+
+  void _seedDemoNodes() {
+    Node<RobotNodeData> panel(int index, double x, double y) {
+      return Node<RobotNodeData>(
+        id: 'robot-$index',
+        type: 'robot_panel',
+        position: XYPosition(x: x, y: y),
+        data: RobotNodeData(
+          label: 'Panel',
+          accentColor: _S.accents[index % _S.accents.length],
+          index: index,
+        ),
+        sourcePosition: Position.right,
+        targetPosition: Position.left,
+        width: _cfg.panelSize,
+        height: _cfg.panelSize,
+      );
+    }
+
+    _nodes = [
+      panel(0, 180, 160),
+      panel(1, 420, 120),
+      panel(2, 420, 280),
+      panel(3, 660, 200),
+    ];
+    _edges = [
+      Edge<void>(
+        id: 'e0-1',
+        source: 'robot-0',
+        target: 'robot-1',
+        type: EdgeTypes.smoothStep,
+      ),
+      Edge<void>(
+        id: 'e0-2',
+        source: 'robot-0',
+        target: 'robot-2',
+        type: EdgeTypes.smoothStep,
+      ),
+      Edge<void>(
+        id: 'e1-3',
+        source: 'robot-1',
+        target: 'robot-3',
+        type: EdgeTypes.smoothStep,
+      ),
+      Edge<void>(
+        id: 'e2-3',
+        source: 'robot-2',
+        target: 'robot-3',
+        type: EdgeTypes.smoothStep,
+      ),
+    ];
+    _nextIndex = 4;
   }
 
   @override

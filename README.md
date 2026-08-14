@@ -7,19 +7,20 @@
 ![npm downloads](https://img.shields.io/npm/dt/reactflow?color=%23FF0072&label=React%20Flow%20downloads)
 ![npm downloads](https://img.shields.io/npm/dt/@xyflow/svelte?color=%23FF3E00&label=Svelte%20Flow%20downloads)
 
-Powerful open source libraries for building node-based UIs with React or Svelte. Ready out-of-the-box and infinitely customizable.
+Powerful open source libraries for building node-based UIs with React, Svelte, or Flutter. Ready out-of-the-box and infinitely customizable.
 
-[React Flow](https://reactflow.dev/) · [Svelte Flow](https://svelteflow.dev/) · [React Flow Pro](https://reactflow.dev/pro) · [Discord](https://discord.gg/Bqt6xrs)
+[React Flow](https://reactflow.dev/) · [Svelte Flow](https://svelteflow.dev/) · [Flutter](./packages/xyflow_flutter) · [React Flow Pro](https://reactflow.dev/pro) · [Discord](https://discord.gg/Bqt6xrs)
 </div>
 
 ---
 
 ## The xyflow mono repo
 
-The xyflow repository is the home of four packages:
+The xyflow repository is the home of five packages:
 * React Flow 12 `@xyflow/react` [packages/react](./packages/react)
 * React Flow 11 `reactflow` [v11 branch](https://github.com/xyflow/xyflow/tree/v11)
 * Svelte Flow `@xyflow/svelte` [packages/svelte](./packages/svelte)
+* Flutter `xyflow_flutter` [packages/xyflow_flutter](./packages/xyflow_flutter)
 * Shared helper library `@xyflow/system` [packages/system](./packages/system)
 
 ## Commercial usage
@@ -30,7 +31,7 @@ The xyflow repository is the home of four packages:
 
 ## Getting started
 
-The best way to get started is to check out the [React Flow](https://reactflow.dev/learn) or [Svelte Flow](https://svelteflow.dev/learn) learn section. However if you want to get a sneak peek of how to install and use the libraries you can see it here: 
+The best way to get started is to check out the [React Flow](https://reactflow.dev/learn) or [Svelte Flow](https://svelteflow.dev/learn) learn section, or the [Flutter package](./packages/xyflow_flutter). However if you want to get a sneak peek of how to install and use the libraries you can see it here: 
 
 <details>
   <summary><strong>React Flow</strong> basic usage</summary>
@@ -149,6 +150,72 @@ npm install @xyflow/svelte
 </SvelteFlow>
 ```
 </details>
+
+<details>
+  <summary><strong>Flutter</strong> basic usage</summary>
+
+  ### Installation
+
+  Add the path dependency from this repo:
+
+  ```yaml
+dependencies:
+  xyflow_flutter:
+    path: packages/xyflow_flutter
+  ```
+
+  ### Basic usage
+  ```dart
+import 'package:flutter/material.dart';
+import 'package:xyflow_flutter/xyflow_flutter.dart';
+
+class FlowPage extends StatefulWidget {
+  const FlowPage({super.key});
+
+  @override
+  State<FlowPage> createState() => _FlowPageState();
+}
+
+class _FlowPageState extends State<FlowPage> {
+  var nodes = [
+    Node(id: '1', position: XYPosition(x: 0, y: 0), data: {'label': '1'}),
+    Node(id: '2', position: XYPosition(x: 0, y: 100), data: {'label': '2'}),
+  ];
+  var edges = [Edge(id: 'e1-2', source: '1', target: '2')];
+
+  @override
+  Widget build(BuildContext context) {
+    return XYFlow(
+      nodes: nodes,
+      edges: edges,
+      onNodesChange: (changes) => setState(() {
+        nodes = applyNodeChanges(changes, nodes);
+      }),
+      onEdgesChange: (changes) => setState(() {
+        edges = applyEdgeChanges(changes, edges);
+      }),
+      children: const [
+        Background(),
+        Controls(),
+        MiniMap(),
+      ],
+    );
+  }
+}
+```
+</details>
+
+## Flutter screenshots
+
+Examples from [`packages/xyflow_flutter/example`](./packages/xyflow_flutter/example):
+
+| Basic Flow | Story Flow |
+| --- | --- |
+| ![Basic Flow](./packages/xyflow_flutter/screenshots/basic.png) | ![Story Flow](./packages/xyflow_flutter/screenshots/story.png) |
+| **Robot Grid** | **ComfyUI Flow** |
+| ![Robot Grid](./packages/xyflow_flutter/screenshots/robot.png) | ![ComfyUI Flow](./packages/xyflow_flutter/screenshots/comfyui.png) |
+| **Custom Nodes** | **Edge Types** |
+| ![Custom Nodes](./packages/xyflow_flutter/screenshots/custom.png) | ![Edge Types](./packages/xyflow_flutter/screenshots/edges.png) |
 
 ## Releases 
 

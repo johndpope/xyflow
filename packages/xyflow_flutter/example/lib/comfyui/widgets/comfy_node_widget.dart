@@ -692,9 +692,9 @@ class _SeedInputWidget extends StatelessWidget {
           InkWell(
             onTap: onChanged != null
                 ? () {
-                    // Generate random seed
-                    final random = DateTime.now().millisecondsSinceEpoch %
-                        0xFFFFFFFFFFFFFFFF;
+                    // Generate random seed (keep within JS-safe integers)
+                    final random =
+                        DateTime.now().microsecondsSinceEpoch & 0x7FFFFFFF;
                     onChanged!(random);
                   }
                 : null,

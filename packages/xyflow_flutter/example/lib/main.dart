@@ -13,11 +13,37 @@ void main() {
   runApp(const MyApp());
 }
 
+Widget exampleFromQuery(String? name) {
+  switch (name) {
+    case 'basic':
+      return const BasicFlowExample();
+    case 'drag':
+      return const DragAndDropExample();
+    case 'custom':
+      return const CustomNodesExample();
+    case 'edges':
+      return const EdgeTypesExample();
+    case 'story':
+      return const StoryFlowExample();
+    case 'connector':
+      return const NodeConnectorExample();
+    case 'advanced':
+      return const AdvancedFeaturesExample();
+    case 'robot':
+      return const RobotGridExample(seedDemo: true);
+    case 'comfyui':
+      return const ComfyFlowExample();
+    default:
+      return const ExampleSelector();
+  }
+}
+
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
   @override
   Widget build(BuildContext context) {
+    final example = Uri.base.queryParameters['example'];
     return MaterialApp(
       title: 'XYFlow Flutter Examples',
       debugShowCheckedModeBanner: false,
@@ -25,7 +51,7 @@ class MyApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
         useMaterial3: true,
       ),
-      home: const ExampleSelector(),
+      home: exampleFromQuery(example),
     );
   }
 }
