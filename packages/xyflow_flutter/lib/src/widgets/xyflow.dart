@@ -263,13 +263,21 @@ class XYFlow<NodeData, EdgeData> extends StatefulWidget {
   // Interaction Options
   // ═══════════════════════════════════════════════════════════════════════════
 
-  /// Whether to pan on scroll.
+  /// Whether to pan on scroll (mouse wheel / two-finger trackpad).
+  ///
+  /// When [zoomOnScroll] is also true, plain wheel pans and Ctrl/Meta+wheel
+  /// zooms (standard node-editor behavior).
   final bool panOnScroll;
 
-  /// Whether to pan on drag.
+  /// Whether to pan by dragging empty canvas (or middle-mouse anywhere).
+  ///
+  /// Dragging a node still moves the node — only the pane pans.
   final bool panOnDrag;
 
   /// Whether to zoom on scroll.
+  ///
+  /// Plain wheel zooms unless [panOnScroll] is true, in which case hold
+  /// Ctrl or Meta (Cmd) while scrolling to zoom.
   final bool zoomOnScroll;
 
   /// Whether to zoom on pinch.
@@ -322,6 +330,7 @@ class _XYFlowState<NodeData, EdgeData> extends State<XYFlow<NodeData, EdgeData>>
 
   // Drag state
   Offset? _lastPanPosition;
+  Offset? _middlePanLast;
   bool _isPanning = false;
 
   // Scale state
@@ -501,6 +510,10 @@ class _XYFlowState<NodeData, EdgeData> extends State<XYFlow<NodeData, EdgeData>>
                     onDoubleTap: widget.zoomOnDoubleClick ? _handleDoubleTap : null,
                     child: Listener(
                       onPointerSignal: _handlePointerSignal,
+                      onPointerDown: _handlePointerDown,
+                      onPointerMove: _handlePointerMove,
+                      onPointerUp: _handlePointerUp,
+                      onPointerCancel: (_) => _middlePanLast = null,
                       child: Container(
                         color: Colors.transparent, // Ensure hit testing works
                         child: XYFlowSurface(
@@ -686,7 +699,25 @@ class _XYFlowState<NodeData, EdgeData> extends State<XYFlow<NodeData, EdgeData>>
   void _handleScaleStart(ScaleStartDetails details) {
     _lastPanPosition = details.focalPoint;
     _initialScale = _state.viewport.zoom;
-    _isPanning = details.pointerCount == 1 && widget.panOnDrag;
+    _isPanning = details.pointerCount == 1 &&
+        widget.panOnDrag &&
+        !_hitNode(details.localFocalPoint);
+  }
+
+  bool _hitNode(Offset local) {
+    final flow = _state.viewport.screenToCanvas(local);
+    for (final node in _state.nodes) {
+      if (node.hidden) continue;
+      final internal = _state.nodeLookup[node.id];
+      if (internal == null) continue;
+      final pos = internal.positionAbsolute;
+      final w = internal.measured?.width ?? node.width ?? 150;
+      final h = internal.measured?.height ?? node.height ?? 40;
+      if (Rect.fromLTWH(pos.x, pos.y, w, h).contains(flow)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   void _handleScaleUpdate(ScaleUpdateDetails details) {
@@ -729,24 +760,58 @@ class _XYFlowState<NodeData, EdgeData> extends State<XYFlow<NodeData, EdgeData>>
     );
   }
 
+  bool get _zoomModifierDown {
+    final keys = HardwareKeyboard.instance.logicalKeysPressed;
+    return keys.contains(LogicalKeyboardKey.controlLeft) ||
+        keys.contains(LogicalKeyboardKey.controlRight) ||
+        keys.contains(LogicalKeyboardKey.metaLeft) ||
+        keys.contains(LogicalKeyboardKey.metaRight);
+  }
+
+  void _zoomByWheel(PointerScrollEvent event) {
+    final delta = event.scrollDelta.dy;
+    if (delta == 0) return;
+    final zoomFactor = delta > 0 ? 0.9 : 1.1;
+    _controller.zoomTo(
+      (_state.viewport.zoom * zoomFactor).clamp(_state.minZoom, _state.maxZoom),
+      center: event.localPosition,
+    );
+  }
+
   void _handlePointerSignal(PointerSignalEvent event) {
-    if (event is PointerScrollEvent) {
-      if (widget.panOnScroll) {
-        // Pan with scroll wheel/trackpad two-finger scroll
-        final dx = event.scrollDelta.dx;
-        final dy = event.scrollDelta.dy;
-        _controller.panBy(Offset(-dx, -dy));
-      } else if (widget.zoomOnScroll) {
-        // Zoom with scroll wheel
-        final delta = event.scrollDelta.dy;
-        final zoomFactor = delta > 0 ? 0.9 : 1.1;
-        _controller.zoomTo(
-          (_state.viewport.zoom * zoomFactor)
-              .clamp(_state.minZoom, _state.maxZoom),
-          center: event.localPosition,
-        );
+    if (event is! PointerScrollEvent) return;
+    final zoomWithModifier = widget.zoomOnScroll && _zoomModifierDown;
+    final shouldZoom = zoomWithModifier ||
+        (widget.zoomOnScroll && !widget.panOnScroll);
+    final shouldPan = widget.panOnScroll && !zoomWithModifier;
+    if (!shouldZoom && !shouldPan) return;
+
+    // Claim the wheel so the browser / parent scroll view does not eat it.
+    GestureBinding.instance.pointerSignalResolver.register(event, (e) {
+      if (e is! PointerScrollEvent) return;
+      if (shouldZoom) {
+        _zoomByWheel(e);
+      } else {
+        _controller.panBy(Offset(-e.scrollDelta.dx, -e.scrollDelta.dy));
       }
+    });
+  }
+
+  void _handlePointerDown(PointerDownEvent event) {
+    if (event.buttons == kMiddleMouseButton) {
+      _middlePanLast = event.position;
     }
+  }
+
+  void _handlePointerMove(PointerMoveEvent event) {
+    final last = _middlePanLast;
+    if (last == null || event.buttons != kMiddleMouseButton) return;
+    _controller.panBy(event.position - last);
+    _middlePanLast = event.position;
+  }
+
+  void _handlePointerUp(PointerUpEvent event) {
+    _middlePanLast = null;
   }
 
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
